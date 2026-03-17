@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "trace-label"
+version = "0.1.0"
+description = "Local trace labeling app with FastAPI, Vue, and Plotly"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.115,<1.0",
+  "h5py>=3.16.0",
+  "numpy>=2.2.6",
+  "uvicorn>=0.30,<1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0,<9.0",
+]
+
+[project.scripts]
+label = "trace_label.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/trace_label"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
