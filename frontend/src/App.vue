@@ -29,9 +29,12 @@
         v-else-if="state.currentTrace && state.page === 'label'"
         :trace="state.currentTrace"
         :mode="state.mode"
+        :visual-mode="state.browseVisualMode"
         :session-mode="state.sessionMode"
         :review-filter="state.reviewFilter"
         :current-label-text="currentLabelText()"
+        :can-toggle-visual-mode="state.mode === 'label_browse'"
+        @set-visual-mode="setBrowseVisualMode"
       />
 
       <section v-else-if="state.page === 'label'" class="welcome-panel">
@@ -94,6 +97,7 @@ const {
   addStrangeLabel,
   handleKeydown,
   currentLabelText,
+  setBrowseVisualMode,
 } = useAppStore();
 
 async function onSaveLabel(payload) {

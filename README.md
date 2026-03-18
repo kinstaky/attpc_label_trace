@@ -57,6 +57,7 @@ The app prints the selected port when it starts. If needed, open `http://127.0.0
 ### Label screen
 
 - The center panel shows the current trace plot.
+- In browse mode, switch between `Raw` and `Analysis` views to compare the raw trace, baseline-removed trace, and Fourier magnitude spectrum.
 - The left sidebar shows normal-label bucket counts.
 - The right sidebar shows strange-label counts and their shortcut keys.
 
@@ -67,6 +68,7 @@ The app prints the selected port when it starts. If needed, open `http://127.0.0
 - `Right Arrow` or `l`: enter strange-label mode
 - `Up Arrow` or `k`: previous trace
 - `Down Arrow` or `j`: next trace
+- `f`: toggle browse visual mode between raw-only and analysis
 - `q` or `Escape`: leave the current mode, or return to the welcome screen from browse mode
 
 ### Normal labels

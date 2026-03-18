@@ -15,6 +15,7 @@ const state = reactive({
   currentTrace: null,
   page: "welcome",
   mode: "welcome",
+  browseVisualMode: "raw",
   sessionMode: "label",
   reviewFilter: null,
   activeSidebar: null,
@@ -33,6 +34,17 @@ function clearTransientUi() {
 function setMode(mode) {
   state.mode = mode;
   state.activeSidebar = mode === "await_normal_peak" ? "left" : mode === "await_strange_choice" ? "right" : null;
+}
+
+function setBrowseVisualMode(mode) {
+  if (mode !== "raw" && mode !== "analysis") {
+    return;
+  }
+  state.browseVisualMode = mode;
+}
+
+function toggleBrowseVisualMode() {
+  state.browseVisualMode = state.browseVisualMode === "raw" ? "analysis" : "raw";
 }
 
 async function init() {
@@ -313,6 +325,11 @@ async function handleKeydown(event) {
       await navigate(-1);
       return;
     }
+    if (key === "f") {
+      event.preventDefault();
+      toggleBrowseVisualMode();
+      return;
+    }
     if (key === "arrowdown" || key === "j") {
       event.preventDefault();
       await navigate(1);
@@ -371,6 +388,8 @@ export function useAppStore() {
     startReview,
     goWelcome,
     setMode,
+    setBrowseVisualMode,
+    toggleBrowseVisualMode,
     navigate,
     submitNormal,
     submitStrange,

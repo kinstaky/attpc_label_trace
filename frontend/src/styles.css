@@ -214,11 +214,86 @@ select {
   gap: 1rem;
 }
 
+.label-header-actions,
 .label-legend {
   display: grid;
+}
+
+.label-header-actions {
+  gap: 0.45rem;
+  justify-items: end;
+}
+
+.label-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: end;
+  gap: 0.9rem;
+}
+
+.label-legend {
   gap: 0.35rem;
   justify-items: end;
   color: #615640;
+}
+
+.trace-plot-stack {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.visual-mode-switch {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: center;
+  min-width: 11.5rem;
+  padding: 0.28rem;
+  border: 1px solid rgba(39, 35, 24, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 252, 245, 0.96);
+  color: #615640;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.visual-mode-thumb {
+  position: absolute;
+  inset: 0.28rem auto 0.28rem 0.28rem;
+  width: calc(50% - 0.28rem);
+  border-radius: 999px;
+  background: linear-gradient(135deg, #174f40, #23634a);
+  box-shadow: 0 8px 18px rgba(20, 70, 55, 0.18);
+  transition: transform 160ms ease;
+}
+
+.visual-mode-switch.analysis .visual-mode-thumb {
+  transform: translateX(100%);
+}
+
+.visual-mode-option {
+  position: relative;
+  z-index: 1;
+  padding: 0.48rem 0.9rem;
+  text-align: center;
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: color 160ms ease;
+}
+
+.visual-mode-switch:not(.analysis) .visual-mode-option--raw,
+.visual-mode-switch.analysis .visual-mode-option--analysis {
+  color: #fffdf8;
+}
+
+.visual-mode-switch:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.visual-mode-hint {
+  color: #615640;
+  font-size: 0.84rem;
 }
 
 .trace-plot {
@@ -226,6 +301,10 @@ select {
   border-radius: 18px;
   overflow: hidden;
   border: 1px solid rgba(35, 30, 20, 0.08);
+}
+
+.trace-plot--secondary {
+  min-height: 20rem;
 }
 
 .metadata-grid {
@@ -326,7 +405,12 @@ select {
     flex-direction: column;
   }
 
+  .label-header-actions,
   .label-legend {
     justify-items: start;
+  }
+
+  .label-toolbar {
+    justify-content: start;
   }
 }

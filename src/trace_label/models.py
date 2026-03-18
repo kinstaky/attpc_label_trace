@@ -37,7 +37,9 @@ class TraceRecord:
     trace_id: int
     detector: str
     hardware_id: np.ndarray
+    raw: np.ndarray
     trace: np.ndarray
+    transformed: np.ndarray
     family: str | None
     label: str | None
 

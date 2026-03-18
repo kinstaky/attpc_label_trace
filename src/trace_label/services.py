@@ -137,7 +137,9 @@ class TraceLabelService:
         return {
             "eventId": record.event_id,
             "traceId": record.trace_id,
+            "raw": record.raw.tolist(),
             "trace": record.trace.tolist(),
+            "transformed": record.transformed.tolist(),
             "currentLabel": self._serialize_label(label),
             "reviewProgress": self.source.get_review_progress(),
         }

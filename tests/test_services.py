@@ -135,3 +135,24 @@ def test_review_mode_rejects_empty_selection(tmp_path) -> None:
 
     with pytest.raises(LookupError, match="no traces match"):
         service.set_trace_mode(mode="review", family="normal", label="1")
+
+
+def test_trace_payload_includes_transformed_trace(tmp_path) -> None:
+    random.seed(11)
+    input_path = tmp_path / "run_0004.h5"
+    db_dir = tmp_path / "db"
+    write_hdf5_input(input_path)
+
+    service = TraceLabelService(input_path=input_path, db_dir=db_dir)
+
+    payload = service.next_trace()
+
+    assert "raw" in payload
+    assert "trace" in payload
+    assert "transformed" in payload
+    assert len(payload["raw"]) == len(payload["trace"]) == 3
+    assert len(payload["transformed"]) == 2
+    np.testing.assert_allclose(
+        payload["transformed"],
+        np.abs(np.fft.rfft(payload["trace"])),
+    )

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import h5py
+import numpy as np
 from pathlib import Path
 import random
 from typing import Literal
-
-import h5py
 
 from .models import TraceRecord
 
@@ -63,26 +63,88 @@ class TraceSource:
         else:
             family = None
             label = None
-        hardware, trace = self._extract_trace_parts(event_id, trace_id)
+        hardware, raw_trace = self._extract_trace_parts(event_id, trace_id)
+        trace = self.preprocess_traces(raw_trace, baseline_window_scale=20.0)
+        transformed = self.transform_trace(trace)
         return TraceRecord(
             run=self.run,
             event_id=event_id,
             trace_id=trace_id,
             detector="pad",
             hardware_id=hardware,
+            raw=raw_trace,
             trace=trace,
+            transformed=transformed,
             family=family,
             label=label,
         )
+
+    def preprocess_traces(self, traces: np.ndarray, baseline_window_scale: float) -> np.ndarray:
+        """JIT-ed Method for pre-cleaning the trace data in bulk before doing trace analysis
+
+        These methods are more suited to operating on the entire dataset rather than on a trace by trace basis
+        It includes
+
+        - Removal of edge effects in traces (first and last time buckets can be noisy)
+        - Baseline removal via fourier transform method (see J. Bradt thesis, pytpc library)
+
+        Parameters
+        ----------
+        traces: ndarray
+            A single trace or a (n, samples) matrix where each row corresponds to a trace.
+        baseline_window_scale: float
+            The scale of the baseline filter used to perform a moving average over the basline
+
+        Returns
+        -------
+        ndarray
+            A new trace or matrix which contains the traces with their baselines removed and
+            edges smoothed
+        """
+        traces_array = np.array(traces, dtype=np.float32, copy=True)
+        single_trace = traces_array.ndim == 1
+        trace_matrix = np.atleast_2d(traces_array)
+        sample_count = trace_matrix.shape[1]
+
+        if sample_count < 2:
+            return traces_array
+
+        # Smooth out the edges of the traces
+        trace_matrix[:, 0] = trace_matrix[:, 1]
+        trace_matrix[:, -1] = trace_matrix[:, -2]
+
+        # Remove peaks from baselines and replace with average
+        bases = trace_matrix.copy()
+        for row in bases:
+            mean = np.mean(row)
+            sigma = np.std(row)
+            mask = np.abs(row - mean) > sigma * 1.5
+            if np.any(~mask):
+                row[mask] = np.mean(row[~mask])
+            else:
+                row.fill(mean)
+
+        # Create the filter
+        window = np.arange(sample_count, dtype=np.float32) - (sample_count // 2)
+        fil = np.fft.ifftshift(np.sinc(window / baseline_window_scale))
+        transformed = np.fft.fft(bases, axis=1)
+        result = np.real(
+            np.fft.ifft(transformed * fil[np.newaxis, :], axis=1)
+        )  # Apply the filter -> multiply in Fourier = convolve in normal
+
+        processed = trace_matrix - result
+        if single_trace:
+            return processed[0]
+        return processed
+
+    def transform_trace(self, trace: np.ndarray) -> np.ndarray:
+        return np.abs(np.fft.rfft(trace))
 
     def _extract_trace_parts(self, event_id: int, trace_id: int) -> tuple:
         pads = self.file["events"][f"event_{event_id}"]["get"]["pads"]
         row = pads[trace_id]
         hardware = row[:5].copy()
         trace = row[5:].copy()
-        if len(trace) > 1:
-            trace[0] = trace[1]
-            trace[-1] = trace[-2]
         return hardware, trace
 
     def _unlabeled_trace_keys(self) -> list[TraceKey]:
