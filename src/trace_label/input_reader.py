@@ -4,11 +4,15 @@ import h5py
 import numpy as np
 from pathlib import Path
 import random
+import threading
+import time
 from typing import Literal
 
 from .models import TraceRecord
 
 TraceKey = tuple[int, int]
+CACHE_RADIUS = 5
+MAX_RANDOM_TRACE_ATTEMPTS = 1024
 
 
 class TraceSource:
@@ -26,6 +30,20 @@ class TraceSource:
         self.trace_mode: Literal["label", "review"] = "label"
         self.review_filter: dict[str, str] | None = None
         self.labeled_traces: dict[tuple[int, int], tuple[str, str]] = {}
+        self.trace_cache: dict[TraceKey, TraceRecord] = {}
+        self._cache_lock = threading.Lock()
+        self._prefetch_condition = threading.Condition()
+        self._prefetch_requested = False
+        self._prefetch_active = False
+        self._prefetch_closed = False
+        self._desired_cache_keys: tuple[TraceKey, ...] = ()
+        self._scheduled_window_keys: tuple[TraceKey, ...] = ()
+        self._prefetch_thread = threading.Thread(
+            target=self._prefetch_loop,
+            name="trace-source-prefetch",
+            daemon=True,
+        )
+        self._prefetch_thread.start()
 
     def get_run(self) -> int:
         return self.run
@@ -42,20 +60,42 @@ class TraceSource:
         self.trace_mode = mode
         if mode == "label":
             self.review_filter = None
+            self._schedule_cache_refresh()
             return len(self.label_event_stack)
         self.review_filter = {"family": family, "label": label or ""}
         self.review_event_stack = self._build_review_stack(family=family, label=label)
         self.review_stack_pointer = 0
+        self._schedule_cache_refresh()
         return len(self.review_event_stack)
 
     def get_trace(self, event_id: int, trace_id: int) -> TraceRecord | None:
+        key = (event_id, trace_id)
+        with self._cache_lock:
+            cached = self.trace_cache.get(key)
+        if cached is not None:
+            return cached
+        record = self._load_trace_record(event_id, trace_id)
+        if record is not None:
+            with self._cache_lock:
+                self.trace_cache[key] = record
+        return record
+
+    def _load_trace_record(self, event_id: int, trace_id: int) -> TraceRecord | None:
+        return self._load_trace_record_from_file(self.file, event_id, trace_id)
+
+    def _load_trace_record_from_file(
+        self,
+        file_handle: h5py.File,
+        event_id: int,
+        trace_id: int,
+    ) -> TraceRecord | None:
         if (
             event_id < self.min_event
             or event_id > self.max_event
             or event_id in self.bad_events
         ):
             return None
-        pads = self.file["events"][f"event_{event_id}"]["get"]["pads"]
+        pads = file_handle["events"][f"event_{event_id}"]["get"]["pads"]
         if trace_id >= pads.shape[0]:
             return None
         if (event_id, trace_id) in self.labeled_traces:
@@ -63,7 +103,7 @@ class TraceSource:
         else:
             family = None
             label = None
-        hardware, raw_trace = self._extract_trace_parts(event_id, trace_id)
+        hardware, raw_trace = self._extract_trace_parts(file_handle, event_id, trace_id)
         trace = self.preprocess_traces(raw_trace, baseline_window_scale=20.0)
         transformed = self.transform_trace(trace)
         return TraceRecord(
@@ -140,30 +180,27 @@ class TraceSource:
     def transform_trace(self, trace: np.ndarray) -> np.ndarray:
         return np.abs(np.fft.rfft(trace))
 
-    def _extract_trace_parts(self, event_id: int, trace_id: int) -> tuple:
-        pads = self.file["events"][f"event_{event_id}"]["get"]["pads"]
+    def _extract_trace_parts(self, file_handle: h5py.File, event_id: int, trace_id: int) -> tuple:
+        pads = file_handle["events"][f"event_{event_id}"]["get"]["pads"]
         row = pads[trace_id]
         hardware = row[:5].copy()
         trace = row[5:].copy()
         return hardware, trace
 
-    def _unlabeled_trace_keys(self) -> list[TraceKey]:
-        trace_keys: list[TraceKey] = []
-        for event_id in range(int(self.min_event), int(self.max_event) + 1):
+    def _random_trace(self) -> TraceKey:
+        for _ in range(MAX_RANDOM_TRACE_ATTEMPTS):
+            event_id = random.randint(int(self.min_event), int(self.max_event))
             if event_id in self.bad_events:
                 continue
             pads = self.file["events"][f"event_{event_id}"]["get"]["pads"]
-            for trace_id in range(int(pads.shape[0])):
-                key = (event_id, trace_id)
-                if key not in self.labeled_traces:
-                    trace_keys.append(key)
-        return trace_keys
-
-    def _random_trace(self) -> TraceKey:
-        candidates = self._unlabeled_trace_keys()
-        if not candidates:
-            raise LookupError("all traces have been labeled")
-        return random.choice(candidates)
+            if pads.shape[0] == 0:
+                continue
+            trace_id = random.randrange(int(pads.shape[0]))
+            key = (event_id, trace_id)
+            if key in self.labeled_traces or key in self.label_event_stack:
+                continue
+            return key
+        raise LookupError("no unlabeled trace was found after repeated random sampling")
 
     def _build_review_stack(self, family: str, label: str | None) -> list[TraceKey]:
         return sorted(
@@ -228,18 +265,171 @@ class TraceSource:
 
     def next_trace(self) -> TraceRecord:
         if self.trace_mode == "review":
-            return self._next_review_trace()
-        return self._next_label_trace()
+            record = self._next_review_trace()
+        else:
+            record = self._next_label_trace()
+        self._schedule_cache_refresh()
+        return record
 
     def previous_trace(self) -> TraceRecord:
         if self.trace_mode == "review":
-            return self._previous_review_trace()
-        return self._previous_label_trace()
+            record = self._previous_review_trace()
+        else:
+            record = self._previous_label_trace()
+        self._schedule_cache_refresh()
+        return record
 
     def label_trace(self, event_id: int, trace_id: int, family: str, label: str) -> None:
         self.labeled_traces[(event_id, trace_id)] = (family, label)
+        with self._cache_lock:
+            cached = self.trace_cache.get((event_id, trace_id))
+        if cached is not None:
+            cached.family = family
+            cached.label = label
         if self.trace_mode == "review":
             self._refresh_review_stack_after_relabel((event_id, trace_id))
+        else:
+            self._prune_prefetched_labeled_traces()
+        self._schedule_cache_refresh()
 
     def set_labeled(self, labeled: dict[tuple[int, int], tuple[str, str]]) -> None:
         self.labeled_traces = labeled.copy()
+
+    def _prune_prefetched_labeled_traces(self) -> None:
+        if self.label_stack_pointer >= len(self.label_event_stack):
+            return
+        history = self.label_event_stack[:self.label_stack_pointer]
+        prefetched = [
+            key
+            for key in self.label_event_stack[self.label_stack_pointer:]
+            if key not in self.labeled_traces
+        ]
+        self.label_event_stack = history + prefetched
+
+    def _current_trace_key(self) -> TraceKey | None:
+        if self.trace_mode == "review":
+            stack = self.review_event_stack
+            pointer = self.review_stack_pointer
+        else:
+            stack = self.label_event_stack
+            pointer = self.label_stack_pointer
+        if not stack or pointer <= 0:
+            return None
+        current_index = min(pointer, len(stack)) - 1
+        return stack[current_index]
+
+    def _ensure_label_prefetch(self) -> None:
+        current_key = self._current_trace_key()
+        if current_key is None or self.trace_mode != "label":
+            return
+        current_index = self.label_stack_pointer - 1
+        required_size = current_index + CACHE_RADIUS + 1
+        while len(self.label_event_stack) < required_size:
+            try:
+                self.label_event_stack.append(self._random_trace())
+            except LookupError:
+                break
+
+    def _cache_window_keys(self) -> list[TraceKey]:
+        current_key = self._current_trace_key()
+        if current_key is None:
+            return []
+        if self.trace_mode == "review":
+            stack = self.review_event_stack
+            current_index = self.review_stack_pointer - 1
+        else:
+            self._ensure_label_prefetch()
+            stack = self.label_event_stack
+            current_index = self.label_stack_pointer - 1
+        start = max(0, current_index - CACHE_RADIUS)
+        stop = min(len(stack), current_index + CACHE_RADIUS + 1)
+        return stack[start:stop]
+
+    def _schedule_cache_refresh(self) -> None:
+        window_keys = tuple(self._cache_window_keys())
+        desired_keys = set(window_keys)
+        with self._cache_lock:
+            self._desired_cache_keys = window_keys
+            self.trace_cache = {
+                key: record
+                for key, record in self.trace_cache.items()
+                if key in desired_keys
+            }
+        with self._prefetch_condition:
+            self._scheduled_window_keys = window_keys
+            self._prefetch_requested = True
+            self._prefetch_condition.notify()
+
+    def _prefetch_loop(self) -> None:
+        with h5py.File(self.path, "r") as prefetch_file:
+            while True:
+                with self._prefetch_condition:
+                    while not self._prefetch_requested and not self._prefetch_closed:
+                        self._prefetch_condition.wait()
+                    if self._prefetch_closed:
+                        return
+                    window_keys = self._scheduled_window_keys
+                    self._prefetch_requested = False
+                    self._prefetch_active = True
+
+                self._prefetch_window(prefetch_file, window_keys)
+
+                with self._prefetch_condition:
+                    self._prefetch_active = False
+                    if not self._prefetch_requested:
+                        self._prefetch_condition.notify_all()
+
+    def _prefetch_window(
+        self,
+        file_handle: h5py.File,
+        window_keys: tuple[TraceKey, ...],
+    ) -> None:
+        desired_keys = set(window_keys)
+        if not desired_keys:
+            with self._cache_lock:
+                self.trace_cache.clear()
+            return
+
+        for key in window_keys:
+            with self._prefetch_condition:
+                if self._prefetch_requested or self._prefetch_closed:
+                    return
+
+            with self._cache_lock:
+                if key in self.trace_cache or key not in self._desired_cache_keys:
+                    continue
+
+            record = self._load_trace_record_from_file(file_handle, *key)
+            if record is None:
+                continue
+
+            current_label = self.labeled_traces.get(key)
+            if current_label is None:
+                record.family = None
+                record.label = None
+            else:
+                record.family, record.label = current_label
+
+            with self._cache_lock:
+                if key not in self._desired_cache_keys:
+                    continue
+                self.trace_cache[key] = record
+                self.trace_cache = {
+                    cached_key: cached_record
+                    for cached_key, cached_record in self.trace_cache.items()
+                    if cached_key in self._desired_cache_keys
+                }
+
+    def _wait_for_prefetch(self, timeout: float = 1.0) -> bool:
+        deadline = time.monotonic() + timeout
+        with self._prefetch_condition:
+            while (self._prefetch_requested or self._prefetch_active) and time.monotonic() < deadline:
+                self._prefetch_condition.wait(timeout=max(0.0, deadline - time.monotonic()))
+            return not self._prefetch_requested and not self._prefetch_active
+
+    def close(self) -> None:
+        with self._prefetch_condition:
+            self._prefetch_closed = True
+            self._prefetch_condition.notify_all()
+        self._prefetch_thread.join(timeout=1.0)
+        self.file.close()
