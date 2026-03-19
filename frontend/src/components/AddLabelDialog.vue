@@ -4,7 +4,7 @@
       <header class="dialog-header">
         <div>
           <p class="dialog-kicker">Strange Label</p>
-          <h3>Manage strange labels</h3>
+          <h3>Create strange label</h3>
         </div>
         <button class="ghost-button" @click="$emit('close')">Close</button>
       </header>
@@ -26,36 +26,6 @@
           <button class="primary-button" type="submit" :disabled="submitting">Save</button>
         </div>
       </form>
-
-      <section class="dialog-section">
-        <header class="dialog-section-header">
-          <div>
-            <p class="dialog-kicker">Existing labels</p>
-            <h4 class="dialog-section-title">Delete unused or incorrect labels</h4>
-          </div>
-        </header>
-        <div v-if="strangeLabels.length" class="label-admin-list">
-          <article
-            v-for="label in strangeLabels"
-            :key="label.name"
-            class="label-admin-card"
-          >
-            <div>
-              <strong>{{ label.name }}</strong>
-              <p class="label-admin-meta">key {{ label.shortcutKey === " " ? "space" : label.shortcutKey }}</p>
-            </div>
-            <button
-              class="danger-button"
-              type="button"
-              :disabled="deletingName === label.name"
-              @click="remove(label.name)"
-            >
-              {{ deletingName === label.name ? "Deleting…" : "Delete" }}
-            </button>
-          </article>
-        </div>
-        <p v-else class="distribution-empty">No strange labels have been created yet.</p>
-      </section>
     </section>
   </div>
 </template>
@@ -65,17 +35,14 @@ import { ref } from "vue";
 
 const props = defineProps({
   saveLabel: { type: Function, required: true },
-  removeLabel: { type: Function, required: true },
-  strangeLabels: { type: Array, default: () => [] },
 });
 
-const emit = defineEmits(["close"]);
+defineEmits(["close"]);
 
 const name = ref("");
 const shortcutKey = ref("");
 const localError = ref("");
 const submitting = ref(false);
-const deletingName = ref("");
 
 async function submit() {
   localError.value = "";
@@ -96,18 +63,6 @@ async function submit() {
     localError.value = error.message;
   } finally {
     submitting.value = false;
-  }
-}
-
-async function remove(labelName) {
-  localError.value = "";
-  deletingName.value = labelName;
-  try {
-    await props.removeLabel(labelName);
-  } catch (error) {
-    localError.value = error.message;
-  } finally {
-    deletingName.value = "";
   }
 }
 </script>

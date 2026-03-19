@@ -219,10 +219,21 @@ class TraceLabelRepository:
         if row is None:
             raise ValueError("strange label not found")
 
-        self.connection.execute(
-            "DELETE FROM trace_labels WHERE family = 'strange' AND label = ?",
+        usage_row = self.connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM trace_labels
+            WHERE family = 'strange' AND label = ?
+            """,
             (strange_label_name,),
-        )
+        ).fetchone()
+        usage_count = int(usage_row["count"])
+        if usage_count > 0:
+            noun = "trace" if usage_count == 1 else "traces"
+            raise ValueError(
+                f'cannot delete strange label "{strange_label_name}" because it has {usage_count} labeled {noun}'
+            )
+
         self.connection.execute(
             "DELETE FROM strange_labels WHERE name = ?",
             (strange_label_name,),

@@ -206,8 +206,16 @@ class TraceSource:
         return sorted(
             key
             for key, stored_label in self.labeled_traces.items()
-            if stored_label[0] == family and (label is None or stored_label[1] == label)
+            if stored_label[0] == family and self._label_matches_review_filter(family, stored_label[1], label)
         )
+
+    @staticmethod
+    def _label_matches_review_filter(family: str, stored_label: str, requested_label: str | None) -> bool:
+        if requested_label is None:
+            return True
+        if family == "normal" and requested_label == "4+":
+            return stored_label in {"4", "5", "6", "7", "8", "9"}
+        return stored_label == requested_label
 
     def _refresh_review_stack_after_relabel(self, current_key: TraceKey) -> None:
         if self.review_filter is None:

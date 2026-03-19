@@ -87,6 +87,9 @@ const sessionLabel = computed(() => {
     return `Review ${props.reviewFilter?.family || ""} labels`.trim();
   }
   if (props.reviewFilter.family === "normal") {
+    if (props.reviewFilter.label === "4+") {
+      return "Review 4+ peaks";
+    }
     return `Review ${props.reviewFilter.label === "9" ? "9+ peaks" : `${props.reviewFilter.label} peak${props.reviewFilter.label === "1" ? "" : "s"}`}`;
   }
   return `Review strange: ${props.reviewFilter.label}`;

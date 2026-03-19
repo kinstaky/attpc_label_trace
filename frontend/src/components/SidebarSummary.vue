@@ -8,7 +8,7 @@
       <article
         v-for="item in visibleItems"
         :key="itemKey(item)"
-        class="summary-card"
+        :class="['summary-card', { 'summary-card--deletable': canDelete }]"
       >
         <div class="summary-title" v-if="type === 'normal'">
           <span class="summary-number">{{ normalNumber(item.title) }}</span>
@@ -23,7 +23,26 @@
         <div class="summary-shortcut" v-if="type === 'strange'">
           key {{ shortcutLabel(item.shortcutKey) }}
         </div>
+        <button
+          v-if="canDelete"
+          type="button"
+          class="summary-delete"
+          @click="$emit('request-delete', item)"
+        >
+          Delete
+        </button>
       </article>
+
+      <button
+        v-if="showAddCard"
+        type="button"
+        class="summary-card summary-card--add"
+        @click="$emit('add')"
+      >
+        <span class="summary-add-mark">+</span>
+        <strong class="summary-add-text">{{ addLabel }}</strong>
+        <span class="summary-add-subtitle">{{ addDescription }}</span>
+      </button>
     </div>
   </aside>
 </template>
@@ -38,11 +57,19 @@ const props = defineProps({
   side: { type: String, required: true },
   active: { type: Boolean, default: false },
   items: { type: Array, default: () => [] },
+  showAddCard: { type: Boolean, default: false },
+  addLabel: { type: String, default: "Add label" },
+  addDescription: { type: String, default: "Create a new shortcut" },
+  allowDelete: { type: Boolean, default: false },
 });
+
+defineEmits(["add", "request-delete"]);
 
 const visibleItems = computed(() =>
   props.type === "normal" ? props.items.filter((item) => !item.hidden) : props.items,
 );
+
+const canDelete = computed(() => props.allowDelete && props.type === "strange");
 
 function itemKey(item) {
   return props.type === "normal" ? item.bucket : item.id;

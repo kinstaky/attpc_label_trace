@@ -23,7 +23,7 @@ const state = reactive({
   error: "",
   statusMessage: "",
   addLabelDialogOpen: false,
-  reviewDialogOpen: false,
+  deleteLabelDialog: null,
 });
 
 function clearTransientUi() {
@@ -118,7 +118,6 @@ async function startReview(family, label) {
     state.page = "label";
     setMode("label_browse");
     await loadNextTrace();
-    closeReviewDialog();
   } catch (error) {
     state.error = error.message;
     throw error;
@@ -240,13 +239,13 @@ function closeAddLabelDialog() {
   state.addLabelDialogOpen = false;
 }
 
-function openReviewDialog() {
-  state.reviewDialogOpen = true;
+function openDeleteLabelDialog(label) {
+  state.deleteLabelDialog = { ...label };
   clearTransientUi();
 }
 
-function closeReviewDialog() {
-  state.reviewDialogOpen = false;
+function closeDeleteLabelDialog() {
+  state.deleteLabelDialog = null;
 }
 
 function syncSummaries(payload) {
@@ -269,7 +268,7 @@ function normalizeKey(event) {
 }
 
 function shouldIgnoreKey(event) {
-  if (state.addLabelDialogOpen || state.reviewDialogOpen) {
+  if (state.addLabelDialogOpen || state.deleteLabelDialog) {
     return true;
   }
   const tagName = event.target?.tagName?.toLowerCase();
@@ -287,11 +286,6 @@ async function handleKeydown(event) {
     if (key === "space") {
       event.preventDefault();
       await startLabeling();
-      return;
-    }
-    if (key === "r") {
-      event.preventDefault();
-      openReviewDialog();
     }
     return;
   }
@@ -397,8 +391,8 @@ export function useAppStore() {
     removeStrangeLabel,
     openAddLabelDialog,
     closeAddLabelDialog,
-    openReviewDialog,
-    closeReviewDialog,
+    openDeleteLabelDialog,
+    closeDeleteLabelDialog,
     handleKeydown,
     currentLabelText,
   };

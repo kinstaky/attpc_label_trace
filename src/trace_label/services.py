@@ -46,8 +46,8 @@ class TraceLabelService:
         if family not in {"normal", "strange"}:
             raise ValueError("review family must be 'normal' or 'strange'")
         if family == "normal" and label is not None:
-            if label not in {str(bucket) for bucket in NORMAL_BUCKETS}:
-                raise ValueError("normal review label must be one of 0-9")
+            if label not in {str(bucket) for bucket in NORMAL_BUCKETS} | {"4+"}:
+                raise ValueError("normal review label must be one of 0-9 or 4+")
         if family == "strange" and label is not None:
             if not self.repository.has_strange_label_name(label):
                 raise ValueError("selected strange label does not exist")
@@ -119,7 +119,7 @@ class TraceLabelService:
 
     def delete_strange_label(self, strange_label_name: str) -> dict[str, Any]:
         self.repository.delete_strange_label(strange_label_name)
-        return self.repository.list_strange_labels()
+        return self.repository.get_strange_counts()
 
     def _normal_summary(self) -> list[dict[str, Any]]:
         counts = self.repository.get_normal_counts()

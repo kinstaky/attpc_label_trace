@@ -137,6 +137,32 @@ def test_review_mode_rejects_empty_selection(tmp_path) -> None:
         service.set_trace_mode(mode="review", family="normal", label="1")
 
 
+def test_review_mode_supports_grouped_normal_filter(tmp_path) -> None:
+    input_path = tmp_path / "run_0007.h5"
+    db_dir = tmp_path / "db"
+    write_hdf5_input(input_path)
+
+    service = TraceLabelService(input_path=input_path, db_dir=db_dir)
+    service.save_label(event_id=1, trace_id=0, family="normal", label="4")
+    service.save_label(event_id=1, trace_id=1, family="normal", label="9")
+    service.save_label(event_id=2, trace_id=0, family="normal", label="2")
+
+    payload = service.set_trace_mode(mode="review", family="normal", label="4+")
+
+    assert payload == {
+        "mode": "review",
+        "reviewFilter": {"family": "normal", "label": "4+"},
+    }
+
+    first = service.next_trace()
+    second = service.next_trace()
+    still_last = service.next_trace()
+
+    assert (first["eventId"], first["traceId"]) == (1, 0)
+    assert (second["eventId"], second["traceId"]) == (1, 1)
+    assert (still_last["eventId"], still_last["traceId"]) == (1, 1)
+
+
 def test_trace_payload_includes_transformed_trace(tmp_path) -> None:
     random.seed(11)
     input_path = tmp_path / "run_0004.h5"
@@ -156,3 +182,30 @@ def test_trace_payload_includes_transformed_trace(tmp_path) -> None:
         payload["transformed"],
         np.abs(np.fft.rfft(payload["trace"])),
     )
+
+
+def test_delete_strange_label_rejects_labels_with_traces(tmp_path) -> None:
+    input_path = tmp_path / "run_0005.h5"
+    db_dir = tmp_path / "db"
+    write_hdf5_input(input_path)
+
+    service = TraceLabelService(input_path=input_path, db_dir=db_dir)
+    service.create_strange_label("Noise", "n")
+    service.save_label(event_id=1, trace_id=1, family="strange", label="Noise")
+
+    with pytest.raises(ValueError, match='cannot delete strange label "Noise" because it has 1 labeled trace'):
+        service.delete_strange_label("Noise")
+
+
+def test_delete_strange_label_allows_unused_labels(tmp_path) -> None:
+    input_path = tmp_path / "run_0006.h5"
+    db_dir = tmp_path / "db"
+    write_hdf5_input(input_path)
+
+    service = TraceLabelService(input_path=input_path, db_dir=db_dir)
+    service.create_strange_label("Noise", "n")
+    service.create_strange_label("Burst", "b")
+
+    remaining = service.delete_strange_label("Noise")
+
+    assert remaining == [{"id": 2, "name": "Burst", "shortcutKey": "b", "count": 0}]

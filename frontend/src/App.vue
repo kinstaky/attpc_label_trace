@@ -7,6 +7,10 @@
       side="left"
       :active="state.activeSidebar === 'left'"
       :items="state.bootstrap?.normalSummary || []"
+      :show-add-card="true"
+      add-label="Add label"
+      add-description="Create strange shortcut"
+      @add="openAddLabelDialog"
     />
 
     <main class="main-panel">
@@ -21,8 +25,7 @@
         v-if="state.bootstrap && state.page === 'welcome'"
         :bootstrap="state.bootstrap"
         @start="startLabeling"
-        @open-add-dialog="openAddLabelDialog"
-        @open-review-dialog="openReviewDialog"
+        @start-review="onStartReview"
       />
 
       <LabelView
@@ -58,22 +61,25 @@
       side="right"
       :active="state.activeSidebar === 'right'"
       :items="state.bootstrap?.strangeSummary || []"
+      :show-add-card="true"
+      :allow-delete="true"
+      add-label="Add label"
+      add-description="Create strange shortcut"
+      @add="openAddLabelDialog"
+      @request-delete="openDeleteLabelDialog"
     />
 
     <AddLabelDialog
       v-if="state.addLabelDialogOpen"
       :save-label="onSaveLabel"
-      :remove-label="onRemoveLabel"
-      :strange-labels="state.bootstrap?.strangeLabels || []"
       @close="closeAddLabelDialog"
     />
 
-    <ReviewModeDialog
-      v-if="state.reviewDialogOpen"
-      :normal-summary="state.bootstrap?.normalSummary || []"
-      :strange-labels="state.bootstrap?.strangeLabels || []"
-      :start-review="onStartReview"
-      @close="closeReviewDialog"
+    <DeleteLabelDialog
+      v-if="state.deleteLabelDialog"
+      :label="state.deleteLabelDialog"
+      :delete-label="onRemoveLabel"
+      @close="closeDeleteLabelDialog"
     />
   </div>
 </template>
@@ -81,7 +87,7 @@
 <script setup>
 import { onBeforeUnmount, onMounted } from "vue";
 import AddLabelDialog from "./components/AddLabelDialog.vue";
-import ReviewModeDialog from "./components/ReviewModeDialog.vue";
+import DeleteLabelDialog from "./components/DeleteLabelDialog.vue";
 import SidebarSummary from "./components/SidebarSummary.vue";
 import LabelView from "./views/LabelView.vue";
 import WelcomeView from "./views/WelcomeView.vue";
@@ -94,8 +100,8 @@ const {
   startReview,
   openAddLabelDialog,
   closeAddLabelDialog,
-  openReviewDialog,
-  closeReviewDialog,
+  openDeleteLabelDialog,
+  closeDeleteLabelDialog,
   addStrangeLabel,
   removeStrangeLabel,
   handleKeydown,
