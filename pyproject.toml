@@ -11,6 +11,8 @@ requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115,<1.0",
   "h5py>=3.16.0",
+  "ipykernel>=7.2.0",
+  "ipympl>=0.10.0",
   "matplotlib>=3.10,<4.0",
   "numba>=0.62,<1.0",
   "numpy>=2.4.3",
@@ -26,6 +28,7 @@ dev = [
 [project.scripts]
 label = "trace_label.__main__:main"
 batch = "trace_label.batch:main"
+batch-labeled = "trace_label.batch_labeled:main"
 plot-batch = "trace_label.plot_batch:main"
 
 [tool.hatch.build.targets.wheel]

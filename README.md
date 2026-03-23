@@ -38,7 +38,7 @@ Start the app from the repository root:
 uv run label -w <workspace> -r <run> -d <sqlite-dir>
 ```
 
-Generate per-trace FFT CDF samples with:
+Generate a 2D histogram of FFT CDF values with:
 
 ```bash
 uv run batch -i <input-file>
@@ -57,8 +57,27 @@ Batch arguments:
 - `-o`, `--output-file`: optional output `.npy` file
 - `--baseline-window-scale`: optional FFT baseline-removal scale, default `20.0`
 
-The batch command writes a NumPy array with shape `(num_traces, 10)` containing:
-`F(10), F(20), F(30), F(40), F(50), F(60), F(100), F(150), F(200), F(250)`.
+Generate per-label 2D histograms from labeled traces with:
+
+```bash
+uv run batch-labeled -w <workspace> -d <sqlite-dir>
+uv run batch-labeled -w <workspace> -r <run> -d <sqlite-dir>
+```
+
+Labeled batch arguments:
+
+- `-w`, `--workspace`: workspace directory containing `run_<run>.h5` files
+- `-r`, `--run`: optional run identifier; when omitted, aggregate labeled traces across all runs present in both workspace and database
+- `-d`, `--database-dir`: directory containing `trace_label.sqlite3`
+- `-o`, `--output-file`: optional output `.npy` file
+- `--baseline-window-scale`: optional FFT baseline-removal scale, default `20.0`
+
+The labeled batch command writes a `.npy` object containing `label_titles`, `histograms`, and `trace_counts`.
+Each histogram has shape `(150, 100)`, and the full `histograms` array has shape `(num_labels, 150, 100)`.
+
+The batch command writes a NumPy array with shape `(150, 100)`.
+The first axis corresponds to `F(1)` through `F(150)`, and the second axis is the CDF-value range `0` to `1` split into `100` bins.
+Each trace contributes one count to each `F(k)` row, so one trace fills `150` histogram cells.
 
 The app prints the selected port when it starts. If needed, open `http://127.0.0.1:<port>` manually in your browser.
 

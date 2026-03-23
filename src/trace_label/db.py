@@ -64,6 +64,22 @@ class TraceLabelRepository:
             for row in rows
         }
 
+    def list_labeled_traces(self, run: int | None = None) -> list[tuple[int, int, int, str, str]]:
+        query = """
+            SELECT run, event_id, trace_id, family, label
+            FROM trace_labels
+        """
+        params: tuple[int, ...] = ()
+        if run is not None:
+            query += " WHERE run = ?"
+            params = (run,)
+        query += " ORDER BY run, event_id, trace_id"
+        rows = self.connection.execute(query, params).fetchall()
+        return [
+            (int(row["run"]), int(row["event_id"]), int(row["trace_id"]), row["family"], row["label"])
+            for row in rows
+        ]
+
     def create_strange_label(self, name: str, shortcut_key: str) -> dict[str, Any]:
         now = utc_now()
         cursor = self.connection.execute(
