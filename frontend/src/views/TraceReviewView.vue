@@ -1,111 +1,328 @@
 <template>
-  <section class="viewer-panel">
-    <header class="content-navbar">
-      <div class="content-navbar-main">
-        <div class="content-navbar-title">
-          <p class="eyebrow">Filtered Trace Review</p>
-          <h1>Trace review</h1>
-          <p class="viewer-copy">
-            Load a generated filter file, then step through the selected traces with the same raw and analysis views used in labeling.
-          </p>
-        </div>
+  <v-container class="page-container" fluid>
+    <div class="page-header">
+      <div>
+        <p class="page-kicker">Review</p>
+        <h1>Trace review</h1>
+        <p class="page-copy">
+          Review either labeled trace sets or traces referenced by saved filter files.
+        </p>
       </div>
-
-      <div class="content-navbar-filters">
-        <label class="viewer-control content-navbar-control content-navbar-control--wide">
-          <span class="meta-title">Filter file</span>
-          <select :value="selectedFilter || ''" @change="$emit('select-filter', $event.target.value)">
-            <option disabled value="">Select a filter file</option>
-            <option v-for="item in filterFiles" :key="item.name" :value="item.name">{{ item.name }}</option>
-          </select>
-        </label>
-
-        <div class="viewer-control content-navbar-control viewer-toggle-group">
-          <span class="meta-title">Plot mode</span>
-          <div class="segmented-control">
-            <button
-              v-for="modeOption in ['raw', 'analysis']"
-              :key="modeOption"
-              type="button"
-              class="segmented-button"
-              :class="{ active: visualMode === modeOption }"
-              @click="$emit('set-visual-mode', modeOption)"
-            >
-              {{ modeOption === 'raw' ? 'Raw' : 'Analysis' }}
-            </button>
-          </div>
-        </div>
-      </div>
-    </header>
-
-    <div class="status-strip">
-      <span v-if="loading">Loading…</span>
-      <span v-else-if="error" class="status-error">{{ error }}</span>
-      <span v-else-if="statusMessage">{{ statusMessage }}</span>
-      <span v-else>&nbsp;</span>
     </div>
 
-    <section v-if="trace" class="label-panel viewer-trace-panel">
-      <header class="label-header">
+    <v-card class="control-card" rounded="xl">
+      <v-card-text>
+        <v-row dense>
+          <v-col cols="12" md="3">
+            <v-select
+              :items="reviewSourceOptions"
+              item-title="title"
+              item-value="value"
+              label="Review source"
+              :model-value="review.state.source"
+              variant="outlined"
+              @update:model-value="review.setSource"
+            />
+          </v-col>
+
+          <template v-if="review.state.source === 'label_set'">
+            <v-col cols="12" md="3">
+              <v-select
+                :items="runOptions"
+                item-title="title"
+                item-value="value"
+                label="Run"
+                :model-value="review.state.run"
+                variant="outlined"
+                @update:model-value="review.setRun"
+              />
+            </v-col>
+            <v-col cols="12" md="3">
+              <v-select
+                :items="familyOptions"
+                item-title="title"
+                item-value="value"
+                label="Family"
+                :model-value="review.state.family"
+                variant="outlined"
+                @update:model-value="review.setFamily"
+              />
+            </v-col>
+            <v-col cols="12" md="3">
+              <v-select
+                :items="labelOptions"
+                item-title="title"
+                item-value="value"
+                label="Label filter"
+                :model-value="review.state.label"
+                variant="outlined"
+                @update:model-value="review.setLabel"
+              />
+            </v-col>
+          </template>
+
+          <v-col v-else cols="12" md="6">
+            <v-select
+              :items="filterFileOptions"
+              item-title="title"
+              item-value="value"
+              label="Filter file"
+              :model-value="review.state.filterFile"
+              variant="outlined"
+              @update:model-value="review.setFilterFile"
+            />
+          </v-col>
+
+          <v-col cols="12" md="3">
+            <v-select
+              :items="visualModeOptions"
+              item-title="title"
+              item-value="value"
+              label="Plot mode"
+              :model-value="review.state.visualMode"
+              variant="outlined"
+              @update:model-value="review.setVisualMode"
+            />
+          </v-col>
+          <v-col cols="12" md="3" class="d-flex align-center">
+            <v-btn color="primary" :loading="review.state.loading" @click="submitReview">
+              Load review set
+            </v-btn>
+          </v-col>
+        </v-row>
+      </v-card-text>
+    </v-card>
+
+    <v-alert
+      v-if="review.state.error"
+      class="mt-4"
+      color="error"
+      icon="mdi-alert-circle-outline"
+      rounded="xl"
+      variant="tonal"
+    >
+      {{ review.state.error }}
+    </v-alert>
+
+    <v-alert
+      v-else-if="review.state.statusMessage"
+      class="mt-4"
+      color="secondary"
+      icon="mdi-information-outline"
+      rounded="xl"
+      variant="tonal"
+    >
+      {{ review.state.statusMessage }}
+    </v-alert>
+
+    <v-card v-if="review.state.currentTrace" class="trace-stage-card mt-4" rounded="xl">
+      <v-card-title class="trace-stage-title">
         <div>
-          <p class="eyebrow">Run {{ trace.run }} · Event {{ trace.eventId }} · Trace {{ trace.traceId }}</p>
-          <h1>{{ currentLabelText(trace.currentLabel) }}</h1>
+          <p class="page-kicker">
+            Run {{ review.state.currentTrace.run }} · Event {{ review.state.currentTrace.eventId }} · Trace {{ review.state.currentTrace.traceId }}
+          </p>
+          <h2>{{ currentLabelText(review.state.currentTrace.currentLabel) }}</h2>
         </div>
-        <div class="label-header-actions">
-          <span class="visual-mode-hint">Press F to toggle. Use J/K or arrows to navigate.</span>
+        <div class="trace-stage-hints">
+          <span>Use J / K or arrows to navigate.</span>
+          <span>Press F to toggle the plot view.</span>
         </div>
-      </header>
+      </v-card-title>
 
-      <TracePlot :trace="trace" :visual-mode="visualMode" />
+      <v-card-text>
+        <TracePlot
+          :trace="review.state.currentTrace"
+          :visual-mode="review.state.visualMode"
+        />
 
-      <div class="trace-meta">
-        <div class="meta-card">
-          <span class="meta-title">Trace key</span>
-          <strong>{{ trace.run }} / {{ trace.eventId }} / {{ trace.traceId }}</strong>
+        <div class="trace-action-toolbar">
+          <div class="trace-action-group">
+            <v-btn variant="text" @click="review.previousReviewTrace()">Previous</v-btn>
+            <v-btn variant="text" @click="review.nextReviewTrace()">Next</v-btn>
+          </div>
         </div>
-        <div class="meta-card">
-          <span class="meta-title">Filter file</span>
-          <strong>{{ selectedFilter }}</strong>
-        </div>
-        <div class="meta-card" v-if="trace.reviewProgress">
-          <span class="meta-title">Review progress</span>
-          <strong>{{ trace.reviewProgress.current }} / {{ trace.reviewProgress.total }}</strong>
-        </div>
-      </div>
-    </section>
 
-    <section v-else class="empty-card">
-      <p class="eyebrow">No trace selected</p>
-      <h2>Select a filter file to begin reviewing traces.</h2>
-      <p class="viewer-copy">
-        The backend discovers `filter_*.npy` files in the workspace and exposes them here automatically.
-      </p>
-    </section>
-  </section>
+        <v-row class="mt-2" dense>
+          <v-col cols="12" md="4">
+            <v-card rounded="xl" variant="tonal">
+              <v-card-text>
+                <p class="page-kicker">Source</p>
+                <strong>{{ reviewSourceLabel }}</strong>
+              </v-card-text>
+            </v-card>
+          </v-col>
+          <v-col cols="12" md="4">
+            <v-card rounded="xl" variant="tonal">
+              <v-card-text>
+                <p class="page-kicker">Trace key</p>
+                <strong>{{ review.state.currentTrace.run }} / {{ review.state.currentTrace.eventId }} / {{ review.state.currentTrace.traceId }}</strong>
+              </v-card-text>
+            </v-card>
+          </v-col>
+          <v-col cols="12" md="4" v-if="review.state.currentTrace.reviewProgress">
+            <v-card rounded="xl" variant="tonal">
+              <v-card-text>
+                <p class="page-kicker">Review progress</p>
+                <strong>
+                  {{ review.state.currentTrace.reviewProgress.current }} / {{ review.state.currentTrace.reviewProgress.total }}
+                </strong>
+              </v-card-text>
+            </v-card>
+          </v-col>
+        </v-row>
+      </v-card-text>
+    </v-card>
+
+    <v-card v-else class="empty-card mt-4" rounded="xl" variant="tonal">
+      <v-card-text>
+        <p class="page-kicker">No trace selected</p>
+        <h2>Choose a review source and load a trace set.</h2>
+      </v-card-text>
+    </v-card>
+  </v-container>
 </template>
 
 <script setup>
-import TracePlot from "../components/TracePlot.vue";
+import { computed, onBeforeUnmount, onMounted, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 
-defineProps({
-  filterFiles: { type: Array, required: true },
-  selectedFilter: { type: String, default: "" },
-  trace: { type: Object, default: null },
-  visualMode: { type: String, required: true },
-  loading: { type: Boolean, default: false },
-  error: { type: String, default: "" },
-  statusMessage: { type: String, default: "" },
+import TracePlot from "../components/TracePlot.vue";
+import { useReviewStore } from "../stores/review";
+import { useShellStore } from "../stores/shell";
+
+const route = useRoute();
+const router = useRouter();
+const shell = useShellStore();
+const review = useReviewStore();
+
+const reviewSourceOptions = [
+  { title: "Labeled traces", value: "label_set" },
+  { title: "Filter file", value: "filter_file" },
+];
+
+const familyOptions = [
+  { title: "Normal", value: "normal" },
+  { title: "Strange", value: "strange" },
+];
+
+const visualModeOptions = [
+  { title: "Raw", value: "raw" },
+  { title: "Analysis", value: "analysis" },
+];
+
+const runOptions = computed(() =>
+  (shell.state.bootstrap?.runs || []).map((run) => ({
+    title: `Run ${run}`,
+    value: Number(run),
+  })),
+);
+
+const filterFileOptions = computed(() =>
+  (shell.state.bootstrap?.filterFiles || []).map((item) => ({
+    title: item.name,
+    value: item.name,
+  })),
+);
+
+const labelOptions = computed(() => {
+  if (review.state.family === "normal") {
+    return [
+      { title: "All normal labels", value: "" },
+      { title: "0 peak", value: "0" },
+      { title: "1 peak", value: "1" },
+      { title: "2 peaks", value: "2" },
+      { title: "3 peaks", value: "3" },
+      { title: "4+ peaks", value: "4+" },
+    ];
+  }
+  return [
+    { title: "All strange labels", value: "" },
+    ...((shell.state.bootstrap?.strangeLabels || []).map((item) => ({
+      title: item.name,
+      value: item.name,
+    }))),
+  ];
 });
 
-defineEmits(["select-filter", "set-visual-mode"]);
+const reviewSourceLabel = computed(() => {
+  if (review.state.source === "filter_file") {
+    return review.state.filterFile || "Filter file";
+  }
+  if (!review.state.label) {
+    return `Labeled ${review.state.family}`;
+  }
+  return `${review.state.family}: ${review.state.label}`;
+});
 
 function currentLabelText(label) {
   if (!label) {
     return "Unlabeled";
   }
   if (label.family === "normal") {
-    return label.label === "9" ? "9+ peaks" : `${label.label} peak${label.label === "1" ? "" : "s"}`;
+    return `${label.label} peak${label.label === "1" ? "" : "s"}`;
   }
   return `Strange: ${label.label}`;
 }
+
+async function submitReview() {
+  await router.replace({ name: "review", query: review.buildQuery() });
+}
+
+async function syncFromRoute(query) {
+  review.applyQuery(query);
+  if (query.source) {
+    try {
+      await review.loadReviewSet();
+    } catch {
+      // Store already captured the error.
+    }
+  }
+}
+
+function shouldIgnoreKey(event) {
+  const tagName = event.target?.tagName?.toLowerCase();
+  return tagName === "input" || tagName === "textarea" || tagName === "select";
+}
+
+async function onKeydown(event) {
+  if (
+    shouldIgnoreKey(event)
+    || review.state.loading
+    || !review.state.currentTrace
+  ) {
+    return;
+  }
+  const key = event.key.toLowerCase();
+  if (key === "f") {
+    event.preventDefault();
+    review.toggleVisualMode();
+    return;
+  }
+  if (key === "arrowup" || key === "k") {
+    event.preventDefault();
+    await review.previousReviewTrace();
+    return;
+  }
+  if (key === "arrowdown" || key === "j") {
+    event.preventDefault();
+    await review.nextReviewTrace();
+  }
+}
+
+onMounted(() => {
+  void syncFromRoute(route.query);
+  window.addEventListener("keydown", onKeydown);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", onKeydown);
+});
+
+watch(
+  () => route.query,
+  (query) => {
+    void syncFromRoute(query);
+  },
+  { deep: true },
+);
 </script>

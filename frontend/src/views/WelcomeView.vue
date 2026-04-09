@@ -1,130 +1,185 @@
 <template>
-  <section class="welcome-panel">
-    <p class="eyebrow">Session Overview</p>
-    <h1>Label traces</h1>
+  <v-container class="page-container" fluid>
+    <div class="page-header">
+      <div>
+        <p class="page-kicker">Home</p>
+        <h1>Trace labeling overview</h1>
+        <p class="page-copy">
+          Review labeled-trace summaries, choose the active run, and jump into labeling or review.
+        </p>
+      </div>
 
-    <button class="primary-button welcome-start-button" @click="$emit('start')">Start</button>
-
-    <div class="progress-card">
-      <div>
-        <p class="progress-kicker">Total labeled</p>
-        <strong>{{ labeledCount }}</strong>
-      </div>
-      <div>
-        <p class="progress-kicker">Normal</p>
-        <strong>{{ normalTotal }}</strong>
-      </div>
-      <div>
-        <p class="progress-kicker">Strange</p>
-        <strong>{{ strangeTotal }}</strong>
-      </div>
+      <v-select
+        class="run-select"
+        :items="runOptions"
+        item-title="title"
+        item-value="value"
+        label="Active run"
+        :model-value="shell.state.selectedRun"
+        variant="outlined"
+        @update:model-value="shell.setSelectedRun"
+      />
     </div>
 
-    <div class="distribution-grid">
-      <section class="distribution-card">
-        <button
-          type="button"
-          class="distribution-header distribution-header-button"
-          :disabled="normalTotal === 0"
-          @click="emitStartReview('normal', null)"
-        >
-          <p class="progress-kicker">Normal Mix</p>
-          <span class="distribution-note">{{ formatPercentage(normalFamilyPercentage) }} of labeled traces</span>
-        </button>
-        <div class="distribution-list">
-          <button
-            v-for="item in normalBreakdown"
-            :key="item.filterValue"
-            type="button"
-            class="distribution-row distribution-row-button"
-            :disabled="item.count === 0"
-            @click="emitStartReview('normal', item.filterValue)"
-          >
-            <div>
-              <strong class="distribution-label">{{ item.label }}</strong>
-              <p class="distribution-meta">{{ item.count }} labeled</p>
-            </div>
-            <strong class="distribution-value">{{ formatPercentage(item.percentage) }}</strong>
-          </button>
-        </div>
-      </section>
+    <v-row class="mb-6" dense>
+      <v-col cols="12" md="4">
+        <v-card rounded="xl" variant="tonal">
+          <v-card-text>
+            <p class="page-kicker">Labeled traces</p>
+            <div class="stat-number">{{ labeledCount }}</div>
+          </v-card-text>
+        </v-card>
+      </v-col>
+      <v-col cols="12" md="4">
+        <v-card rounded="xl" variant="tonal">
+          <v-card-text>
+            <p class="page-kicker">Normal</p>
+            <div class="stat-number">{{ normalTotal }}</div>
+          </v-card-text>
+        </v-card>
+      </v-col>
+      <v-col cols="12" md="4">
+        <v-card rounded="xl" variant="tonal">
+          <v-card-text>
+            <p class="page-kicker">Strange</p>
+            <div class="stat-number">{{ strangeTotal }}</div>
+          </v-card-text>
+        </v-card>
+      </v-col>
+    </v-row>
 
-      <section class="distribution-card">
-        <button
-          type="button"
-          class="distribution-header distribution-header-button"
-          :disabled="strangeTotal === 0"
-          @click="emitStartReview('strange', null)"
-        >
-          <p class="progress-kicker">Strange Mix</p>
-          <span class="distribution-note">{{ formatPercentage(strangeFamilyPercentage) }} of labeled traces</span>
-        </button>
-        <div v-if="strangeBreakdown.length" class="distribution-list">
-          <button
-            v-for="item in strangeBreakdown"
-            :key="item.id"
-            type="button"
-            class="distribution-row distribution-row-button"
-            :disabled="item.count === 0"
-            @click="emitStartReview('strange', item.name)"
-          >
+    <v-row dense>
+      <v-col cols="12" lg="6">
+        <v-card class="dashboard-card" rounded="xl">
+          <v-card-title class="dashboard-title">
             <div>
-              <strong class="distribution-label">{{ item.name }}</strong>
-              <p class="distribution-meta">{{ item.count }} labeled</p>
+              <p class="page-kicker">Normal mix</p>
+              <h2>Peak-count review</h2>
             </div>
-            <strong class="distribution-value">{{ formatPercentage(item.percentage) }}</strong>
-          </button>
-        </div>
-        <p v-else class="distribution-empty">No strange labels have been created yet.</p>
-      </section>
-    </div>
+            <v-btn
+              color="primary"
+              variant="tonal"
+              :disabled="normalTotal === 0"
+              @click="openReview('normal', null)"
+            >
+              Review all
+            </v-btn>
+          </v-card-title>
+          <v-card-text class="dashboard-list">
+            <button
+              v-for="item in normalBreakdown"
+              :key="item.filterValue"
+              class="dashboard-item"
+              :disabled="item.count === 0"
+              @click="openReview('normal', item.filterValue)"
+            >
+              <div>
+                <strong>{{ item.label }}</strong>
+                <span>{{ item.count }} labeled</span>
+              </div>
+              <span>{{ formatPercentage(item.percentage) }}</span>
+            </button>
+          </v-card-text>
+        </v-card>
+      </v-col>
 
-    <dl class="meta-list">
-      <div>
-        <dt>Trace Source</dt>
-        <dd>{{ bootstrap.tracePath }}</dd>
-      </div>
-      <div>
-        <dt>Database</dt>
-        <dd>{{ bootstrap.databaseFile }}</dd>
-      </div>
-    </dl>
-  </section>
+      <v-col cols="12" lg="6">
+        <v-card class="dashboard-card" rounded="xl">
+          <v-card-title class="dashboard-title">
+            <div>
+              <p class="page-kicker">Strange mix</p>
+              <h2>Special-case review</h2>
+            </div>
+            <v-btn
+              color="primary"
+              variant="tonal"
+              :disabled="strangeTotal === 0"
+              @click="openReview('strange', null)"
+            >
+              Review all
+            </v-btn>
+          </v-card-title>
+          <v-card-text class="dashboard-list">
+            <button
+              v-for="item in strangeBreakdown"
+              :key="item.name"
+              class="dashboard-item"
+              :disabled="item.count === 0"
+              @click="openReview('strange', item.name)"
+            >
+              <div>
+                <strong>{{ item.name }}</strong>
+                <span>{{ item.count }} labeled</span>
+              </div>
+              <span>{{ formatPercentage(item.percentage) }}</span>
+            </button>
+          </v-card-text>
+        </v-card>
+      </v-col>
+    </v-row>
+
+    <v-row class="mt-2" dense>
+      <v-col cols="12" md="6">
+        <v-card rounded="xl" variant="text">
+          <v-card-text>
+            <p class="page-kicker">Trace source</p>
+            <strong>{{ shell.state.bootstrap?.tracePath }}</strong>
+          </v-card-text>
+        </v-card>
+      </v-col>
+      <v-col cols="12" md="6">
+        <v-card rounded="xl" variant="text">
+          <v-card-text>
+            <p class="page-kicker">Database</p>
+            <strong>{{ shell.state.bootstrap?.databaseFile }}</strong>
+          </v-card-text>
+        </v-card>
+      </v-col>
+    </v-row>
+  </v-container>
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed, onBeforeUnmount, onMounted } from "vue";
+import { useRouter } from "vue-router";
 
-const props = defineProps({
-  bootstrap: { type: Object, required: true },
-});
+import { useShellStore } from "../stores/shell";
 
-const emit = defineEmits(["start", "start-review"]);
+const router = useRouter();
+const shell = useShellStore();
+
+const runOptions = computed(() =>
+  (shell.state.bootstrap?.runs || []).map((run) => ({
+    title: `Run ${run}`,
+    value: Number(run),
+  })),
+);
 
 const normalTotal = computed(() =>
-  (props.bootstrap?.normalSummary || []).reduce((total, item) => total + Number(item.count || 0), 0),
+  (shell.state.bootstrap?.normalSummary || []).reduce(
+    (total, item) => total + Number(item.count || 0),
+    0,
+  ),
 );
 
 const strangeTotal = computed(() =>
-  (props.bootstrap?.strangeSummary || []).reduce((total, item) => total + Number(item.count || 0), 0),
+  (shell.state.bootstrap?.strangeSummary || []).reduce(
+    (total, item) => total + Number(item.count || 0),
+    0,
+  ),
 );
 
 const labeledCount = computed(() => normalTotal.value + strangeTotal.value);
 
-const normalFamilyPercentage = computed(() =>
-  labeledCount.value > 0 ? (normalTotal.value / labeledCount.value) * 100 : 0,
-);
-
-const strangeFamilyPercentage = computed(() =>
-  labeledCount.value > 0 ? (strangeTotal.value / labeledCount.value) * 100 : 0,
-);
-
 const normalBreakdown = computed(() => {
   const countsByBucket = new Map(
-    (props.bootstrap?.normalSummary || []).map((item) => [Number(item.bucket), Number(item.count || 0)]),
+    (shell.state.bootstrap?.normalSummary || []).map((item) => [
+      Number(item.bucket),
+      Number(item.count || 0),
+    ]),
   );
   const total = normalTotal.value;
-  const groupedItems = [
+  const grouped = [
     { label: "0 peak", filterValue: "0", count: countsByBucket.get(0) || 0 },
     { label: "1 peak", filterValue: "1", count: countsByBucket.get(1) || 0 },
     { label: "2 peaks", filterValue: "2", count: countsByBucket.get(2) || 0 },
@@ -132,10 +187,13 @@ const normalBreakdown = computed(() => {
     {
       label: "4+ peaks",
       filterValue: "4+",
-      count: [4, 5, 6, 7, 8, 9].reduce((sum, bucket) => sum + (countsByBucket.get(bucket) || 0), 0),
+      count: [4, 5, 6, 7, 8, 9].reduce(
+        (sum, bucket) => sum + (countsByBucket.get(bucket) || 0),
+        0,
+      ),
     },
   ];
-  return groupedItems.map((item) => ({
+  return grouped.map((item) => ({
     ...item,
     percentage: total > 0 ? (item.count / total) * 100 : 0,
   }));
@@ -143,7 +201,7 @@ const normalBreakdown = computed(() => {
 
 const strangeBreakdown = computed(() => {
   const total = strangeTotal.value;
-  return (props.bootstrap?.strangeSummary || []).map((item) => ({
+  return (shell.state.bootstrap?.strangeSummary || []).map((item) => ({
     ...item,
     count: Number(item.count || 0),
     percentage: total > 0 ? (Number(item.count || 0) / total) * 100 : 0,
@@ -155,7 +213,34 @@ function formatPercentage(value) {
   return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}%`;
 }
 
-function emitStartReview(family, label) {
-  emit("start-review", { family, label });
+function openReview(family, label) {
+  router.push({
+    name: "review",
+    query: {
+      source: "label_set",
+      run: shell.state.selectedRun ?? undefined,
+      family,
+      label: label || undefined,
+    },
+  });
 }
+
+function onKeydown(event) {
+  const tagName = event.target?.tagName?.toLowerCase();
+  if (tagName === "input" || tagName === "textarea" || tagName === "select") {
+    return;
+  }
+  if (event.key === " ") {
+    event.preventDefault();
+    router.push({ name: "label" });
+  }
+}
+
+onMounted(() => {
+  window.addEventListener("keydown", onKeydown);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", onKeydown);
+});
 </script>

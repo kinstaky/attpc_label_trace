@@ -1,41 +1,39 @@
 <template>
-  <section v-if="loading" class="welcome-panel root-panel">
-    <p class="eyebrow">Application</p>
-    <h1>Loading app state…</h1>
-  </section>
+  <v-app>
+    <section v-if="state.loading" class="app-loading-state">
+      <p class="page-kicker">Application</p>
+      <h1>Loading app state…</h1>
+    </section>
 
-  <section v-else-if="error" class="welcome-panel root-panel">
-    <p class="eyebrow">Application</p>
-    <h1>Failed to load the backend bootstrap.</h1>
-    <p class="welcome-copy">{{ error }}</p>
-  </section>
+    <section v-else-if="state.error" class="app-loading-state">
+      <p class="page-kicker">Application</p>
+      <h1>Failed to load the backend bootstrap.</h1>
+      <p class="page-copy">{{ state.error }}</p>
+    </section>
 
-  <LabelApp v-else-if="bootstrap?.appType === 'label'" :bootstrap="bootstrap" />
-  <ViewerApp v-else-if="bootstrap?.appType === 'viewer'" :bootstrap="bootstrap" />
+    <section v-else-if="state.bootstrap?.appType !== 'merged'" class="app-loading-state">
+      <p class="page-kicker">Application</p>
+      <h1>Unsupported app type.</h1>
+    </section>
 
-  <section v-else class="welcome-panel root-panel">
-    <p class="eyebrow">Application</p>
-    <h1>Unsupported app type.</h1>
-  </section>
+    <v-layout v-else class="app-layout">
+      <MainNavRail />
+
+      <v-main class="app-main">
+        <router-view />
+      </v-main>
+    </v-layout>
+  </v-app>
 </template>
 
 <script setup>
-import { onMounted, ref } from "vue";
-import LabelApp from "./apps/LabelApp.vue";
-import ViewerApp from "./apps/ViewerApp.vue";
-import { getBootstrap } from "./api";
+import { onMounted } from "vue";
+import MainNavRail from "./components/MainNavRail.vue";
+import { useShellStore } from "./stores/shell";
 
-const loading = ref(true);
-const error = ref("");
-const bootstrap = ref(null);
+const { state, init } = useShellStore();
 
-onMounted(async () => {
-  try {
-    bootstrap.value = await getBootstrap();
-  } catch (caughtError) {
-    error.value = caughtError.message;
-  } finally {
-    loading.value = false;
-  }
+onMounted(() => {
+  void init();
 });
 </script>

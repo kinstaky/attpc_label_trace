@@ -11,7 +11,8 @@
 
 <script setup>
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import Plotly from "plotly.js-dist-min";
+
+import { loadPlotly } from "../lib/plotly";
 
 const props = defineProps({
   trace: { type: Object, default: null },
@@ -25,10 +26,11 @@ function sampleIndices(values) {
   return values.map((_, index) => index);
 }
 
-function renderRawPlot() {
+async function renderRawPlot() {
   if (!primaryRoot.value || !props.trace) {
     return;
   }
+  const Plotly = await loadPlotly();
   Plotly.react(
     primaryRoot.value,
     [
@@ -72,10 +74,11 @@ function renderRawPlot() {
   );
 }
 
-function renderAnalysisPlots() {
+async function renderAnalysisPlots() {
   if (!primaryRoot.value || !secondaryRoot.value || !props.trace) {
     return;
   }
+  const Plotly = await loadPlotly();
 
   Plotly.react(
     primaryRoot.value,
@@ -188,11 +191,12 @@ async function renderPlots() {
   await nextTick();
 
   if (props.visualMode === "analysis") {
-    renderAnalysisPlots();
+    await renderAnalysisPlots();
     return;
   }
 
-  renderRawPlot();
+  const Plotly = await loadPlotly();
+  await renderRawPlot();
   if (secondaryRoot.value) {
     Plotly.purge(secondaryRoot.value);
   }
@@ -209,11 +213,13 @@ watch(() => props.visualMode, () => {
 });
 
 onBeforeUnmount(() => {
-  if (primaryRoot.value) {
-    Plotly.purge(primaryRoot.value);
-  }
-  if (secondaryRoot.value) {
-    Plotly.purge(secondaryRoot.value);
-  }
+  void loadPlotly().then((Plotly) => {
+    if (primaryRoot.value) {
+      Plotly.purge(primaryRoot.value);
+    }
+    if (secondaryRoot.value) {
+      Plotly.purge(secondaryRoot.value);
+    }
+  });
 });
 </script>

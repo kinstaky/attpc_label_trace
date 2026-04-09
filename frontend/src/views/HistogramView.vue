@@ -1,279 +1,276 @@
 <template>
-  <section class="viewer-panel viewer-panel--histograms">
-    <header class="content-navbar">
-      <div class="content-navbar-main">
-        <div class="content-navbar-title">
-        <h1>Accumulated histograms</h1>
-        </div>
-
-        <label class="viewer-control content-navbar-control content-navbar-control--run">
-          <span class="meta-title">Run</span>
-          <select :value="selectedRun" @change="$emit('select-run', Number($event.target.value))">
-            <option v-for="run in runs" :key="run" :value="run">Run {{ run }}</option>
-          </select>
-        </label>
+  <v-container class="page-container" fluid>
+    <div class="page-header">
+      <div>
+        <p class="page-kicker">Histograms</p>
+        <h1>Accumulated trace histograms</h1>
+        <p class="page-copy">
+          Compare all-trace, labeled, and filtered distributions for CDF and amplitude metrics.
+        </p>
       </div>
-
-      <div class="content-navbar-filters">
-        <div class="viewer-control content-navbar-control">
-          <span class="meta-title">Metric</span>
-          <div class="segmented-control segmented-control--tabs">
-            <button
-              v-for="metricOption in ['cdf', 'amplitude']"
-              :key="metricOption"
-              type="button"
-              class="segmented-button segmented-button--tab"
-              :class="{ active: selectedMetric === metricOption }"
-              @click="$emit('select-metric', metricOption)"
-            >
-              {{ metricOption === 'cdf' ? 'CDF' : 'Amplitude' }}
-            </button>
-          </div>
-        </div>
-
-        <div class="viewer-control content-navbar-control">
-          <span class="meta-title">Trace set</span>
-          <div class="segmented-control">
-            <button
-              v-for="modeOption in traceSetOptions"
-              :key="modeOption.value"
-              type="button"
-              class="segmented-button"
-              :class="{ active: selectedMode === modeOption.value }"
-              :disabled="!availability?.[selectedMetric]?.[modeOption.value]"
-              @click="$emit('select-mode', modeOption.value)"
-            >
-              {{ modeOption.label }}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div class="content-navbar-filters content-navbar-filters--secondary">
-        <label
-          v-if="selectedMode === 'filtered'"
-          class="viewer-control content-navbar-control content-navbar-control--filter"
-        >
-          <span class="meta-title">Filter file</span>
-          <select
-            :value="selectedHistogramFilter || ''"
-            @change="$emit('select-histogram-filter', $event.target.value)"
-          >
-            <option v-for="item in filterFiles" :key="item.name" :value="item.name">
-              {{ item.name }}
-            </option>
-          </select>
-        </label>
-
-        <div class="viewer-control content-navbar-control">
-          <span class="meta-title">{{ scaleLabel }}</span>
-          <div class="segmented-control">
-            <button
-              v-for="scaleOption in ['linear', 'log']"
-              :key="scaleOption"
-              type="button"
-              class="segmented-button"
-              :class="{ active: scaleMode === scaleOption }"
-              @click="$emit('select-scale', scaleOption)"
-            >
-              {{ scaleOption === 'linear' ? 'Linear' : 'Log' }}
-            </button>
-          </div>
-        </div>
-
-        <template v-if="selectedMetric === 'cdf'">
-          <div class="viewer-control content-navbar-control">
-            <span class="meta-title">CDF display</span>
-            <div class="segmented-control">
-              <button
-                v-for="renderOption in renderOptions"
-                :key="renderOption.value"
-                type="button"
-                class="segmented-button"
-                :class="{ active: cdfRenderMode === renderOption.value }"
-                @click="$emit('select-cdf-render-mode', renderOption.value)"
-              >
-                {{ renderOption.label }}
-              </button>
-            </div>
-          </div>
-
-          <label
-            v-if="cdfRenderMode === 'projection'"
-            class="viewer-control content-navbar-control content-navbar-control--bin"
-          >
-            <span class="meta-title">Projection bin</span>
-            <input
-              class="viewer-number-input"
-              type="number"
-              min="1"
-              max="150"
-              :value="cdfProjectionBin"
-              @input="$emit('select-cdf-projection-bin', Number($event.target.value))"
-            />
-          </label>
-        </template>
-      </div>
-    </header>
-
-    <div class="status-strip">
-      <span v-if="loading">Loading…</span>
-      <span v-else-if="error" class="status-error">{{ error }}</span>
-      <span v-else-if="statusMessage">{{ statusMessage }}</span>
-      <span v-else>&nbsp;</span>
     </div>
 
-    <section
-      v-if="histogram && orderedSeries.length"
-      class="result-grid"
-      :class="resultGridClass"
+    <v-card class="control-card" rounded="xl">
+      <v-card-text>
+        <v-row dense>
+          <v-col cols="12" md="4">
+            <v-select
+              :items="runOptions"
+              item-title="title"
+              item-value="value"
+              label="Run"
+              :model-value="store.state.selectedRun"
+              variant="outlined"
+              @update:model-value="store.setSelectedRun"
+            />
+          </v-col>
+          <v-col cols="12" md="4">
+            <v-select
+              :items="metricOptions"
+              item-title="title"
+              item-value="value"
+              label="Metric"
+              :model-value="store.state.selectedMetric"
+              variant="outlined"
+              @update:model-value="store.setSelectedMetric"
+            />
+          </v-col>
+          <v-col cols="12" md="4">
+            <v-select
+              :items="modeOptions"
+              item-title="title"
+              item-value="value"
+              label="Trace set"
+              :model-value="store.state.selectedMode"
+              variant="outlined"
+              @update:model-value="store.setSelectedMode"
+            />
+          </v-col>
+          <v-col v-if="store.state.selectedMode === 'filtered'" cols="12" md="6">
+            <v-select
+              :items="filterFileOptions"
+              item-title="title"
+              item-value="value"
+              label="Filter file"
+              :model-value="store.state.selectedHistogramFilter"
+              variant="outlined"
+              @update:model-value="store.setSelectedHistogramFilter"
+            />
+          </v-col>
+          <v-col cols="12" md="3">
+            <v-select
+              :items="scaleOptions"
+              item-title="title"
+              item-value="value"
+              :label="scaleLabel"
+              :model-value="store.scaleMode.value"
+              variant="outlined"
+              @update:model-value="store.setScaleMode"
+            />
+          </v-col>
+          <v-col v-if="store.state.selectedMetric === 'cdf'" cols="12" md="3">
+            <v-select
+              :items="cdfRenderOptions"
+              item-title="title"
+              item-value="value"
+              label="CDF display"
+              :model-value="store.state.cdfRenderMode"
+              variant="outlined"
+              @update:model-value="store.setCdfRenderMode"
+            />
+          </v-col>
+          <v-col
+            v-if="store.state.selectedMetric === 'cdf' && store.state.cdfRenderMode === 'projection'"
+            cols="12"
+            md="3"
+          >
+            <v-text-field
+              label="Projection bin"
+              :model-value="store.state.cdfProjectionBin"
+              min="1"
+              max="150"
+              type="number"
+              variant="outlined"
+              @update:model-value="store.setCdfProjectionBin"
+            />
+          </v-col>
+        </v-row>
+      </v-card-text>
+    </v-card>
+
+    <v-alert
+      v-if="store.state.error"
+      class="mt-4"
+      color="error"
+      icon="mdi-alert-circle-outline"
+      rounded="xl"
+      variant="tonal"
     >
-      <article
+      {{ store.state.error }}
+    </v-alert>
+
+    <div v-if="store.state.loading" class="empty-state">
+      <v-progress-circular color="primary" indeterminate />
+    </div>
+
+    <v-row
+      v-else-if="store.state.histogram?.series?.length"
+      class="mt-4"
+      dense
+    >
+      <v-col
         v-for="series in orderedSeries"
         :key="series.labelKey"
-        class="result-card"
-        :class="[
-          resultCardClass,
-          { 'result-card--draggable': canDragCards, 'result-card--drag-over': dropTargetLabelKey === series.labelKey },
-        ]"
-        :draggable="canDragCards"
-        @dragstart="onDragStart(series.labelKey)"
-        @dragend="onDragEnd"
-        @dragover.prevent="onDragOver(series.labelKey)"
-        @drop.prevent="onDrop(series.labelKey)"
+        cols="12"
+        :lg="store.state.selectedMode === 'labeled' ? 4 : 12"
       >
-        <header class="result-card-header">
-          <div>
-            <p class="progress-kicker">{{ series.labelKey }}</p>
-            <h2>{{ series.title }}</h2>
-          </div>
-          <div class="result-card-meta">
-            <strong v-if="series.traceCount !== null && series.traceCount !== undefined">
-              {{ series.traceCount }} traces
+        <v-card
+          class="result-card-vuetify"
+          :class="{
+            'result-card-vuetify--draggable': isDraggable,
+            'result-card-vuetify--drop-target': dropTargetKey === series.labelKey,
+          }"
+          rounded="xl"
+          :draggable="isDraggable"
+          @dragstart="onDragStart(series.labelKey)"
+          @dragover.prevent="onDragOver(series.labelKey)"
+          @drop.prevent="onDrop(series.labelKey)"
+          @dragend="clearDragState"
+        >
+          <v-card-title class="result-card-title">
+            <div>
+              <p class="page-kicker">{{ series.labelKey }}</p>
+              <h2>{{ series.title }}</h2>
+            </div>
+            <strong>
+              {{ series.traceCount ?? series.histogram.length }}
+              {{ series.traceCount !== null && series.traceCount !== undefined ? "traces" : "bins" }}
             </strong>
-            <strong v-else>{{ sumCounts(series.histogram) }} peaks</strong>
-          </div>
-        </header>
-        <ResultPlot
-          :metric="histogram.metric"
-          :series="series"
-          :thresholds="histogram.thresholds || []"
-          :value-bin-count="histogram.valueBinCount || 0"
-          :bin-count="histogram.binCount || 0"
-          :scale-mode="scaleMode"
-          :cdf-render-mode="cdfRenderMode"
-          :cdf-projection-bin="cdfProjectionBin"
-        />
-      </article>
-    </section>
+          </v-card-title>
+          <v-card-text>
+            <ResultPlot
+              :class="{ 'result-plot--all-traces': store.state.selectedMode === 'all' }"
+              :metric="store.state.histogram.metric"
+              :series="series"
+              :thresholds="store.state.histogram.thresholds || []"
+              :value-bin-count="store.state.histogram.valueBinCount || 0"
+              :bin-count="store.state.histogram.binCount || 0"
+              :scale-mode="store.scaleMode.value"
+              :cdf-render-mode="store.state.cdfRenderMode"
+              :cdf-projection-bin="store.state.cdfProjectionBin"
+            />
+          </v-card-text>
+        </v-card>
+      </v-col>
+    </v-row>
 
-    <section v-else class="empty-card">
-      <p class="eyebrow">No data</p>
-      <h2>No histogram artifacts are available for this selection.</h2>
-      <p class="viewer-copy">
-        Generate the matching `cdf` or `amplitude` output in the workspace, then reload this page.
-      </p>
-    </section>
-  </section>
+    <v-card v-else class="empty-card mt-4" rounded="xl" variant="tonal">
+      <v-card-text>
+        <p class="page-kicker">No data</p>
+        <h2>No histogram artifacts are available for this selection.</h2>
+      </v-card-text>
+    </v-card>
+  </v-container>
 </template>
 
-<script setup>
-import { computed, ref } from "vue";
+<script setup lang="ts">
+import { computed, onMounted, ref } from "vue";
 
 import ResultPlot from "../components/ResultPlot.vue";
+import { useHistogramStore } from "../stores/histograms";
+import { useShellStore } from "../stores/shell";
+import type { HistogramAvailabilityEntry } from "../types";
 
-const props = defineProps({
-  runs: { type: Array, required: true },
-  selectedRun: { type: Number, default: null },
-  selectedMetric: { type: String, required: true },
-  selectedMode: { type: String, required: true },
-  filterFiles: { type: Array, required: true },
-  selectedHistogramFilter: { type: String, default: "" },
-  availability: { type: Object, default: null },
-  histogram: { type: Object, default: null },
-  orderedSeries: { type: Array, required: true },
-  loading: { type: Boolean, default: false },
-  error: { type: String, default: "" },
-  statusMessage: { type: String, default: "" },
-  scaleMode: { type: String, required: true },
-  cdfRenderMode: { type: String, required: true },
-  cdfProjectionBin: { type: Number, required: true },
-});
+const shell = useShellStore();
+const store = useHistogramStore();
+const draggedSeriesKey = ref<string | null>(null);
+const dropTargetKey = ref<string | null>(null);
 
-const emit = defineEmits([
-  "select-run",
-  "select-metric",
-  "select-mode",
-  "select-histogram-filter",
-  "select-scale",
-  "select-cdf-render-mode",
-  "select-cdf-projection-bin",
-  "reorder-series",
-]);
+const runOptions = computed(() =>
+  (shell.state.bootstrap?.runs || []).map((run) => ({
+    title: `Run ${run}`,
+    value: Number(run),
+  })),
+);
 
-const draggedLabelKey = ref(null);
-const dropTargetLabelKey = ref(null);
+const filterFileOptions = computed(() =>
+  (shell.state.bootstrap?.filterFiles || []).map((item) => ({
+    title: item.name,
+    value: item.name,
+  })),
+);
 
-const renderOptions = [
-  { value: "2d", label: "2D histogram" },
-  { value: "projection", label: "1D projection" },
+const metricOptions = [
+  { title: "CDF", value: "cdf" },
+  { title: "Amplitude", value: "amplitude" },
 ];
 
-const traceSetOptions = [
-  { value: "all", label: "All traces" },
-  { value: "labeled", label: "Labeled" },
-  { value: "filtered", label: "From file" },
+const modeOptions = computed(() => {
+  const availability = store.getAvailability() as
+    | Record<"cdf" | "amplitude", HistogramAvailabilityEntry>
+    | null;
+  const metricAvailability = availability?.[store.state.selectedMetric];
+  return [
+    { title: "All traces", value: "all", props: { disabled: !metricAvailability?.all } },
+    { title: "Labeled", value: "labeled", props: { disabled: !metricAvailability?.labeled } },
+    { title: "From file", value: "filtered", props: { disabled: !metricAvailability?.filtered } },
+  ];
+});
+
+const scaleOptions = [
+  { title: "Linear", value: "linear" },
+  { title: "Log", value: "log" },
+];
+
+const cdfRenderOptions = [
+  { title: "2D histogram", value: "2d" },
+  { title: "1D projection", value: "projection" },
 ];
 
 const scaleLabel = computed(() => {
-  if (props.selectedMetric === "amplitude") {
+  if (store.state.selectedMetric === "amplitude") {
     return "Y scale";
   }
-  return props.cdfRenderMode === "projection" ? "Y scale" : "Z scale";
+  return store.state.cdfRenderMode === "projection" ? "Y scale" : "Z scale";
 });
 
-const resultGridClass = computed(() => ({
-  "result-grid--single": props.selectedMode !== "labeled",
-  "result-grid--triple": props.selectedMode === "labeled",
-}));
+const orderedSeries = computed(() => store.orderedSeries.value);
 
-const resultCardClass = computed(() => ({
-  "result-card--emphasis": props.selectedMode !== "labeled",
-  "result-card--cdf": props.selectedMetric === "cdf",
-}));
+const isDraggable = computed(
+  () => store.state.selectedMode === "labeled" && orderedSeries.value.length > 1,
+);
 
-const canDragCards = computed(() => props.orderedSeries.length > 1);
-
-function onDragStart(labelKey) {
-  if (!canDragCards.value) {
+function onDragStart(labelKey: string): void {
+  if (!isDraggable.value) {
     return;
   }
-  draggedLabelKey.value = labelKey;
+  draggedSeriesKey.value = labelKey;
+  dropTargetKey.value = null;
 }
 
-function onDragEnd() {
-  draggedLabelKey.value = null;
-  dropTargetLabelKey.value = null;
-}
-
-function onDragOver(labelKey) {
-  if (!canDragCards.value || draggedLabelKey.value === labelKey) {
+function onDragOver(labelKey: string): void {
+  if (!isDraggable.value || !draggedSeriesKey.value || draggedSeriesKey.value === labelKey) {
+    dropTargetKey.value = null;
     return;
   }
-  dropTargetLabelKey.value = labelKey;
+  dropTargetKey.value = labelKey;
 }
 
-function onDrop(labelKey) {
-  if (!canDragCards.value || !draggedLabelKey.value) {
+function onDrop(labelKey: string): void {
+  if (!draggedSeriesKey.value || draggedSeriesKey.value === labelKey) {
+    clearDragState();
     return;
   }
-  if (draggedLabelKey.value !== labelKey) {
-    emit("reorder-series", draggedLabelKey.value, labelKey);
-  }
-  onDragEnd();
+  store.reorderCurrentSeries(draggedSeriesKey.value, labelKey);
+  clearDragState();
 }
 
-function sumCounts(values) {
-  return values.reduce((total, value) => total + Number(value || 0), 0);
+function clearDragState(): void {
+  draggedSeriesKey.value = null;
+  dropTargetKey.value = null;
 }
+
+onMounted(() => {
+  void store.init();
+});
 </script>

@@ -6,8 +6,9 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from attpc_estimator.db import TraceLabelRepository
-from attpc_estimator.viewer.cdf import build_labeled_cdf_histograms, main
+from attpc_estimator.cli.cdf import main
+from attpc_estimator.storage.labels_db import LabelRepository
+from attpc_estimator.process.cdf import build_labeled_cdf_histograms
 
 
 def write_hdf5_input(path: Path, traces: np.ndarray) -> None:
@@ -27,7 +28,7 @@ def write_hdf5_input(path: Path, traces: np.ndarray) -> None:
 
 
 def seed_labels(workspace: Path) -> None:
-    repository = TraceLabelRepository(workspace / "trace_label.db")
+    repository = LabelRepository(workspace / "labels.db")
     repository.initialize()
     repository.create_strange_label("Noise", "n")
     repository.create_strange_label("Burst", "b")
@@ -96,8 +97,8 @@ def test_cdf_main_writes_labeled_output_for_selected_run(tmp_path, monkeypatch) 
     )
     main()
 
-    output_path = workspace / "run_0008_labeled_cdf.npy"
-    payload = np.load(output_path, allow_pickle=True).item()
+    output_path = workspace / "run_0008_labeled_cdf.npz"
+    payload = np.load(output_path)
 
     assert output_path.is_file()
     assert payload["run_id"] == 8
@@ -124,7 +125,7 @@ def test_cdf_labeled_main_reads_options_from_config_file(tmp_path, monkeypatch) 
     monkeypatch.setattr(sys, "argv", ["cdf", "-c", str(config_path)])
     main()
 
-    output_path = workspace / "run_0008_labeled_cdf.npy"
-    payload = np.load(output_path, allow_pickle=True).item()
+    output_path = workspace / "run_0008_labeled_cdf.npz"
+    payload = np.load(output_path)
     assert output_path.is_file()
     assert payload["run_id"] == 8

@@ -6,9 +6,13 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from attpc_estimator.label_trace.input_reader import TraceSource
-from attpc_estimator.viewer.cdf import CDF_THRESHOLDS, CDF_VALUE_BINS, build_trace_cdf_histogram, main
-from attpc_estimator.viewer.utils import preprocess_traces, sample_cdf_points
+from attpc_estimator.cli.cdf import main
+from attpc_estimator.process.cdf import (
+    CDF_THRESHOLDS,
+    CDF_VALUE_BINS,
+    build_trace_cdf_histogram,
+)
+from attpc_estimator.utils.trace_data import preprocess_traces, sample_cdf_points
 
 
 def write_hdf5_input(path: Path) -> None:
@@ -90,6 +94,7 @@ def test_sample_cdf_points_uses_under_frequency_convention() -> None:
 def test_preprocess_traces_matches_existing_reader_implementation(tmp_path) -> None:
     trace_path = tmp_path / "run_0007.h5"
     write_hdf5_input(trace_path)
+    _ = trace_path
 
     traces = np.array(
         [
@@ -99,14 +104,9 @@ def test_preprocess_traces_matches_existing_reader_implementation(tmp_path) -> N
         dtype=np.float32,
     )
 
-    source = TraceSource(trace_path)
-    try:
-        expected = source.preprocess_traces(traces, baseline_window_scale=20.0)
-    finally:
-        source.close()
-
+    expected = preprocess_traces_reference(traces, baseline_window_scale=20.0)
     actual = preprocess_traces(traces, baseline_window_scale=20.0)
-    np.testing.assert_allclose(actual, expected, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(actual, expected, rtol=1e-5, atol=1e-6)
 
 
 def test_preprocess_traces_matches_reference_fft_implementation() -> None:

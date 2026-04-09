@@ -7,12 +7,12 @@ import h5py
 import numpy as np
 import pytest
 
-from attpc_estimator.db import TraceLabelRepository
-from attpc_estimator.viewer.amplitude import build_labeled_amplitude_histograms
-from attpc_estimator.viewer.amplitude import main as find_peaks_main
-from attpc_estimator.viewer.relabel_labeled import build_relabel_rows
-from attpc_estimator.viewer.relabel_labeled import main as relabel_main
-from attpc_estimator.viewer.utils import read_labeled_trace
+from attpc_estimator.cli.amplitude import main as find_peaks_main
+from attpc_estimator.cli.estimate_relabel import main as relabel_main
+from attpc_estimator.process.estimate_relabel import build_relabel_rows
+from attpc_estimator.storage.labels_db import LabelRepository
+from attpc_estimator.process.amplitude import build_labeled_amplitude_histograms
+from attpc_estimator.storage.labeled_traces import read_labeled_trace
 
 
 def _oscillation_trace() -> np.ndarray:
@@ -62,9 +62,8 @@ def write_run_file(path: Path, events: dict[int, list[np.ndarray]]) -> None:
             get_group.create_dataset("pads", data=_pad_rows(events[event_id]))
 
 
-def seed_workspace_db(workspace: Path, *, legacy_name: bool = False) -> None:
-    db_name = "trace_label.db" if legacy_name else "trace_label.db"
-    repository = TraceLabelRepository(workspace / db_name)
+def seed_workspace_db(workspace: Path) -> None:
+    repository = LabelRepository(workspace / "labels.db")
     repository.initialize()
     repository.create_strange_label("oscillation", "o")
     repository.save_label(8, 1, 0, "pad", 1, 1, 1, 1, 1, "strange", "oscillation")
@@ -76,7 +75,7 @@ def seed_workspace_db(workspace: Path, *, legacy_name: bool = False) -> None:
     repository.connection.close()
 
 
-def make_workspace(tmp_path: Path, *, legacy_db: bool = False) -> Path:
+def make_workspace(tmp_path: Path) -> Path:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     write_run_file(
@@ -92,7 +91,7 @@ def make_workspace(tmp_path: Path, *, legacy_db: bool = False) -> Path:
             1: [_high_amplitude_trace()],
         },
     )
-    seed_workspace_db(workspace, legacy_name=legacy_db)
+    seed_workspace_db(workspace)
     return workspace
 
 
@@ -120,8 +119,8 @@ def test_read_labeled_trace_returns_storage_keys_for_selected_run_and_all_runs(
     assert all_labels == labels_run8 + ["normal:1"]
 
 
-def test_read_labeled_trace_uses_legacy_db_filename(tmp_path) -> None:
-    workspace = make_workspace(tmp_path, legacy_db=True)
+def test_read_labeled_trace_uses_labels_db_filename(tmp_path) -> None:
+    workspace = make_workspace(tmp_path)
 
     traces, labels = read_labeled_trace(
         trace_path=workspace, workspace_path=workspace, run=8
@@ -158,8 +157,7 @@ def test_build_relabel_rows_noise_applies_zero_peak_rule_and_reports_noise_ratio
         "normal:1",
         "normal:0",
     ]
-    assert set(metrics) == {"changed_count", "normal0_to_normal0", "normal1_to_normal0"}
-    assert metrics["changed_count"] == 1
+    assert set(metrics) == {"normal0_to_normal0", "normal1_to_normal0"}
     assert metrics["normal0_to_normal0"] == (1, 1)
     assert metrics["normal1_to_normal0"] == (1, 3)
 
@@ -184,11 +182,9 @@ def test_build_relabel_rows_oscillation_applies_f60_rule_and_reports_oscillation
         "normal:0",
     ]
     assert set(metrics) == {
-        "changed_count",
         "oscillation_to_oscillation",
         "normal1_to_oscillation",
     }
-    assert metrics["changed_count"] == 1
     assert metrics["oscillation_to_oscillation"] == (1, 1)
     assert metrics["normal1_to_oscillation"] == (1, 3)
 
@@ -341,15 +337,26 @@ def test_build_labeled_amplitude_histograms_groups_histograms_by_label(
     assert payload["label_keys"].tolist() == [
         "normal:0",
         "normal:1",
+        "normal:2",
+        "normal:3",
+        "normal:4+",
         "strange:oscillation",
     ]
-    assert payload["trace_counts"].tolist() == [1, 3, 1]
-    assert int(payload["normal:0"].sum()) == 0
-    assert int(payload["normal:1"].sum()) == 5
-    assert int(payload["strange:oscillation"].sum()) == 5
+    assert payload["label_titles"].tolist() == [
+        "0 peak",
+        "1 peak",
+        "2 peaks",
+        "3 peaks",
+        "4+ peaks",
+        "oscillation",
+    ]
+    assert payload["trace_counts"].tolist() == [1, 3, 0, 0, 0, 1]
+    assert int(payload["histograms"][0].sum()) == 0
+    assert int(payload["histograms"][1].sum()) == 5
+    assert int(payload["histograms"][5].sum()) == 5
 
 
-def test_find_peaks_main_labeled_writes_payload_dict(tmp_path, monkeypatch) -> None:
+def test_find_peaks_main_labeled_writes_payload_npz(tmp_path, monkeypatch) -> None:
     workspace = make_workspace(tmp_path)
 
     monkeypatch.setattr(
@@ -369,14 +376,17 @@ def test_find_peaks_main_labeled_writes_payload_dict(tmp_path, monkeypatch) -> N
 
     find_peaks_main()
 
-    output_path = workspace / "run_0008_labeled_amp.npy"
-    payload = np.load(output_path, allow_pickle=True).item()
+    output_path = workspace / "run_0008_labeled_amp.npz"
+    payload = np.load(output_path)
 
     assert output_path.is_file()
     assert payload["label_keys"].tolist() == [
         "normal:0",
         "normal:1",
+        "normal:2",
+        "normal:3",
+        "normal:4+",
         "strange:oscillation",
     ]
-    assert payload["trace_counts"].tolist() == [1, 3, 1]
-    assert int(payload["normal:1"].sum()) == 5
+    assert payload["trace_counts"].tolist() == [1, 3, 0, 0, 0, 1]
+    assert int(payload["histograms"][1].sum()) == 5

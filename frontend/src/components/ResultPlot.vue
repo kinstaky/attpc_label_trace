@@ -4,7 +4,8 @@
 
 <script setup>
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
-import Plotly from "plotly.js-dist-min";
+
+import { loadPlotly } from "../lib/plotly";
 
 const props = defineProps({
   metric: { type: String, required: true },
@@ -81,7 +82,8 @@ function baseLayout() {
   };
 }
 
-function renderCdfHeatmap() {
+async function renderCdfHeatmap() {
+  const Plotly = await loadPlotly();
   const thresholds = props.thresholds.map(Number);
   const values = cdfValueCenters(props.valueBinCount);
   const original = transposeMatrix(props.series.histogram);
@@ -126,7 +128,8 @@ function renderCdfHeatmap() {
   );
 }
 
-function renderCdfProjection() {
+async function renderCdfProjection() {
+  const Plotly = await loadPlotly();
   const thresholds = props.thresholds.map(Number);
   const values = cdfValueCenters(props.valueBinCount);
   const { index, threshold } = resolveProjectionThreshold(
@@ -184,7 +187,8 @@ function renderCdfProjection() {
   );
 }
 
-function renderAmplitude() {
+async function renderAmplitude() {
+  const Plotly = await loadPlotly();
   const count = props.binCount || props.series.histogram.length;
   const yValues = props.series.histogram.map((value) => {
     const total = Number(value || 0);
@@ -231,22 +235,24 @@ function renderAmplitude() {
   );
 }
 
-function renderPlot() {
+async function renderPlot() {
   if (!root.value) {
     return;
   }
   if (props.metric === "cdf") {
     if (props.cdfRenderMode === "projection") {
-      renderCdfProjection();
+      await renderCdfProjection();
       return;
     }
-    renderCdfHeatmap();
+    await renderCdfHeatmap();
     return;
   }
-  renderAmplitude();
+  await renderAmplitude();
 }
 
-onMounted(renderPlot);
+onMounted(() => {
+  void renderPlot();
+});
 
 watch(
   () => [
@@ -259,13 +265,17 @@ watch(
     props.cdfRenderMode,
     props.cdfProjectionBin,
   ],
-  renderPlot,
+  () => {
+    void renderPlot();
+  },
   { deep: true },
 );
 
 onBeforeUnmount(() => {
-  if (root.value) {
-    Plotly.purge(root.value);
-  }
+  void loadPlotly().then((Plotly) => {
+    if (root.value) {
+      Plotly.purge(root.value);
+    }
+  });
 });
 </script>

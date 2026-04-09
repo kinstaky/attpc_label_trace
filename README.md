@@ -55,7 +55,7 @@ CDF arguments:
 The `cdf` command writes:
 
 - full traces: `workspace/run_<run>_cdf.npy`
-- labeled traces: `workspace/run_<run>_labeled_cdf.npy`
+- labeled traces: `workspace/run_<run>_labeled_cdf.npz`
 
 Generate peak-amplitude histograms with:
 
