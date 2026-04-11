@@ -5,6 +5,10 @@ from pathlib import Path
 DEFAULT_LABELS_DB_FILENAME = "labels.db"
 
 
+def format_run_id(run: int | str) -> str:
+    return f"{int(run):04d}"
+
+
 def resolve_run_file(trace_path: Path, run: int | str) -> Path:
     normalized_run = int(run)
     if trace_path.is_file():
@@ -16,7 +20,7 @@ def resolve_run_file(trace_path: Path, run: int | str) -> Path:
             )
         return resolved
 
-    direct_candidate = trace_path / f"run_{run}.h5"
+    direct_candidate = trace_path / f"run_{format_run_id(normalized_run)}.h5"
     if direct_candidate.is_file():
         return direct_candidate.resolve()
 

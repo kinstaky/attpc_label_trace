@@ -6,7 +6,6 @@ from pathlib import Path
 
 import numpy as np
 
-from .config import parse_run, parse_toml_config
 from ..process.filter import (
     DEFAULT_TRACE_LIMIT,
     UNLIMITED_TRACE_LIMIT,
@@ -14,6 +13,9 @@ from ..process.filter import (
     default_output_name,
     normalize_amplitude_range,
 )
+from ..storage.run_paths import format_run_id
+from .config import parse_run, parse_toml_config
+from .progress import tqdm_reporter
 
 
 def main() -> None:
@@ -22,24 +24,32 @@ def main() -> None:
     workspace = Path(args.workspace).expanduser().resolve()
     run_token = args.run
     run_id = int(run_token)
+    run_name = format_run_id(run_id)
     amplitude_range = normalize_amplitude_range(args.amplitude)
     output_path = (
         Path(args.output).expanduser().resolve()
         if args.output is not None
-        else workspace / default_output_name(run_token, amplitude_range, args.oscillation)
+        else workspace / default_output_name(run_name, amplitude_range, args.oscillation)
     )
 
-    rows = build_filter_rows(
-        trace_path=trace_root,
-        run=run_id,
-        amplitude_range=amplitude_range,
-        oscillation=args.oscillation,
-        baseline_window_scale=args.baseline_window_scale,
-        peak_separation=args.peak_separation,
-        peak_prominence=args.peak_prominence,
-        peak_width=args.peak_width,
-        limit=args.limit,
+    progress_desc = (
+        "Scanning run"
+        if args.limit == UNLIMITED_TRACE_LIMIT
+        else "Collecting filter rows"
     )
+    with tqdm_reporter(progress_desc) as progress:
+        rows = build_filter_rows(
+            trace_path=trace_root,
+            run=run_id,
+            amplitude_range=amplitude_range,
+            oscillation=args.oscillation,
+            baseline_window_scale=args.baseline_window_scale,
+            peak_separation=args.peak_separation,
+            peak_prominence=args.peak_prominence,
+            peak_width=args.peak_width,
+            limit=args.limit,
+            progress=progress,
+        )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     np.save(output_path, rows)
 

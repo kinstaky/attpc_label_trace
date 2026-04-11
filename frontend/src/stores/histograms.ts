@@ -1,8 +1,13 @@
 import { computed, reactive } from "vue";
 
-import { getHistogram } from "../api";
+import { createHistogramJob, getHistogram, histogramJobSocketUrl } from "../api";
 import { useShellStore } from "./shell";
-import type { HistogramPayload, HistogramSeries } from "../types";
+import type {
+  HistogramJobMessage,
+  HistogramJobProgress,
+  HistogramPayload,
+  HistogramSeries,
+} from "../types";
 
 const DEFAULT_CDF_PROJECTION_BIN = 60;
 const LABEL_ORDER_SUFFIX = ":labeled";
@@ -17,12 +22,15 @@ interface HistogramState {
   selectedMetric: HistogramMetric;
   selectedMode: HistogramMode;
   selectedHistogramFilter: string;
+  selectedHistogramVeto: boolean;
+  filteredPlotDirty: boolean;
   histogram: HistogramPayload | null;
   cdfScaleMode: ScaleMode;
   amplitudeScaleMode: ScaleMode;
   cdfRenderMode: CdfRenderMode;
   cdfProjectionBin: number;
   loading: boolean;
+  progress: HistogramJobProgress | null;
   error: string;
 }
 
@@ -31,19 +39,32 @@ const state = reactive<HistogramState>({
   selectedMetric: "cdf",
   selectedMode: "all",
   selectedHistogramFilter: "",
+  selectedHistogramVeto: false,
+  filteredPlotDirty: false,
   histogram: null,
   cdfScaleMode: "linear",
   amplitudeScaleMode: "linear",
   cdfRenderMode: "2d",
   cdfProjectionBin: DEFAULT_CDF_PROJECTION_BIN,
   loading: false,
+  progress: null,
   error: "",
 });
 
 const labeledSeriesOrder = reactive<Record<string, string[]>>({});
+let activeSocket: WebSocket | null = null;
+let loadSequence = 0;
 
 function clearTransientUi(): void {
   state.error = "";
+}
+
+function closeActiveSocket(): void {
+  if (activeSocket === null) {
+    return;
+  }
+  activeSocket.close();
+  activeSocket = null;
 }
 
 function currentSeriesOrderKey(): string | null {
@@ -103,34 +124,152 @@ function ensureModeAvailability(): void {
   }
 }
 
-async function loadHistogram(): Promise<void> {
+async function loadHistogram(forceFiltered = false): Promise<void> {
   ensureInitialized();
+  const loadId = ++loadSequence;
+  closeActiveSocket();
   if (state.selectedRun === null) {
     state.histogram = null;
+    state.progress = null;
+    state.filteredPlotDirty = state.selectedMode === "filtered";
+    return;
+  }
+  clearTransientUi();
+  ensureModeAvailability();
+  if (state.selectedMode === "filtered" && !forceFiltered) {
+    state.loading = false;
+    state.progress = null;
+    state.filteredPlotDirty = true;
+    if (state.histogram?.mode !== "filtered") {
+      state.histogram = null;
+    }
     return;
   }
   state.loading = true;
-  clearTransientUi();
-  ensureModeAvailability();
+  state.progress = null;
   try {
-    state.histogram = await getHistogram(
-      state.selectedMetric,
-      state.selectedMode,
-      state.selectedRun,
-      state.selectedMode === "filtered" ? state.selectedHistogramFilter : "",
-    );
+    if (state.selectedMode === "filtered") {
+      state.histogram = await loadFilteredHistogram(loadId);
+      state.filteredPlotDirty = false;
+    } else {
+      state.histogram = await getHistogram(
+        state.selectedMetric,
+        state.selectedMode,
+        state.selectedRun,
+        "",
+        false,
+      );
+      state.progress = null;
+      state.filteredPlotDirty = false;
+    }
     syncCurrentSeriesOrder();
   } catch (error) {
+    if (loadId !== loadSequence) {
+      return;
+    }
     state.histogram = null;
+    state.progress = null;
     state.error = error instanceof Error ? error.message : String(error);
   } finally {
-    state.loading = false;
+    if (loadId === loadSequence) {
+      state.loading = false;
+      if (state.selectedMode !== "filtered") {
+        state.progress = null;
+      }
+    }
   }
+}
+
+async function loadFilteredHistogram(loadId: number): Promise<HistogramPayload> {
+  if (state.selectedRun === null) {
+    throw new Error("run is required");
+  }
+  if (!state.selectedHistogramFilter) {
+    throw new Error("filter file is required");
+  }
+  const { jobId } = await createHistogramJob(
+    state.selectedMetric,
+    "filtered",
+    state.selectedRun,
+    state.selectedHistogramFilter,
+    state.selectedHistogramVeto,
+  );
+  if (loadId !== loadSequence) {
+    throw new Error("stale histogram request");
+  }
+
+  return await new Promise<HistogramPayload>((resolve, reject) => {
+    const socket = new WebSocket(histogramJobSocketUrl(jobId));
+    let settled = false;
+    activeSocket = socket;
+
+    const finish = (handler: () => void): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (activeSocket === socket) {
+        activeSocket = null;
+      }
+      handler();
+    };
+
+    socket.onmessage = (event) => {
+      if (loadId !== loadSequence) {
+        finish(() => socket.close());
+        return;
+      }
+      const message = JSON.parse(event.data) as HistogramJobMessage;
+      if (message.type === "progress") {
+        state.progress = {
+          current: message.current,
+          total: message.total,
+          percent: message.percent,
+          unit: message.unit,
+          message: message.message,
+        };
+        return;
+      }
+      if (message.type === "complete") {
+        finish(() => {
+          socket.close();
+          resolve(message.payload);
+        });
+        return;
+      }
+      finish(() => {
+        socket.close();
+        reject(new Error(message.detail));
+      });
+    };
+
+    socket.onerror = () => {
+      finish(() => reject(new Error("histogram progress connection failed")));
+    };
+
+    socket.onclose = () => {
+      if (settled) {
+        return;
+      }
+      if (loadId !== loadSequence) {
+        settled = true;
+        return;
+      }
+      finish(() => reject(new Error("histogram progress connection closed")));
+    };
+  });
 }
 
 async function init(): Promise<void> {
   ensureInitialized();
   await loadHistogram();
+}
+
+async function plotFilteredHistogram(): Promise<void> {
+  if (state.selectedMode !== "filtered") {
+    return;
+  }
+  await loadHistogram(true);
 }
 
 async function setSelectedRun(run: number | string | null): Promise<void> {
@@ -152,11 +291,21 @@ async function setSelectedMode(mode: HistogramMode): Promise<void> {
     state.selectedHistogramFilter =
       shell.state.bootstrap?.filterFiles?.[0]?.name || "";
   }
+  if (mode !== "filtered") {
+    state.filteredPlotDirty = false;
+  }
   await loadHistogram();
 }
 
 async function setSelectedHistogramFilter(name: string): Promise<void> {
   state.selectedHistogramFilter = name;
+  await loadHistogram();
+}
+
+async function setSelectedHistogramVeto(
+  value: boolean | null | undefined,
+): Promise<void> {
+  state.selectedHistogramVeto = Boolean(value);
   await loadHistogram();
 }
 
@@ -234,10 +383,12 @@ export function useHistogramStore() {
     init,
     getAvailability,
     loadHistogram,
+    plotFilteredHistogram,
     setSelectedRun,
     setSelectedMetric,
     setSelectedMode,
     setSelectedHistogramFilter,
+    setSelectedHistogramVeto,
     setScaleMode,
     setCdfRenderMode,
     setCdfProjectionBin,

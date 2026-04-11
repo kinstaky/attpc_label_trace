@@ -1,5 +1,6 @@
 import type {
   BootstrapPayload,
+  HistogramJobCreateResponse,
   HistogramPayload,
   LabelAssignResponse,
   SessionPayload,
@@ -145,6 +146,7 @@ export function getHistogram(
   mode: "all" | "labeled" | "filtered",
   run: number,
   filterFile = "",
+  veto = false,
 ): Promise<HistogramPayload> {
   const params = new URLSearchParams({
     metric,
@@ -154,5 +156,33 @@ export function getHistogram(
   if (filterFile) {
     params.set("filterFile", filterFile);
   }
+  if (veto) {
+    params.set("veto", "true");
+  }
   return request<HistogramPayload>(`/api/histograms?${params.toString()}`);
+}
+
+export function createHistogramJob(
+  metric: "cdf" | "amplitude",
+  mode: "filtered",
+  run: number,
+  filterFile: string,
+  veto = false,
+): Promise<HistogramJobCreateResponse> {
+  return request<HistogramJobCreateResponse>("/api/histograms/jobs", {
+    method: "POST",
+    body: JSON.stringify({
+      metric,
+      mode,
+      run,
+      filterFile,
+      veto,
+    }),
+  });
+}
+
+export function histogramJobSocketUrl(jobId: string): string {
+  const url = new URL(`/api/histograms/jobs/${jobId}`, window.location.href);
+  url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
 }

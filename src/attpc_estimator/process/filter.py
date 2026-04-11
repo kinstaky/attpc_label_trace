@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
+from .progress import ProgressReporter, emit_progress
 from ..process.amplitude import max_peak_amplitude
 from ..storage.run_paths import resolve_run_file
 from ..utils.trace_data import compute_frequency_distribution, sample_cdf_points
@@ -25,6 +26,7 @@ def build_filter_rows(
     peak_prominence: float = 20.0,
     peak_width: float = 50.0,
     limit: int = DEFAULT_TRACE_LIMIT,
+    progress: ProgressReporter | None = None,
 ) -> np.ndarray:
     if amplitude_range is None and not oscillation:
         raise ValueError("at least one filter criterion is required")
@@ -37,10 +39,17 @@ def build_filter_rows(
 
     selected_rows: list[tuple[int, int, int]] = []
     unlimited = limit == UNLIMITED_TRACE_LIMIT
+    if not unlimited:
+        emit_progress(
+            progress,
+            current=0,
+            total=limit,
+            unit="trace",
+        )
 
-    def handle_batch(event_id: int, cleaned: np.ndarray) -> None:
+    def handle_batch(event_id: int, cleaned: np.ndarray) -> bool | None:
         if not unlimited and len(selected_rows) >= limit:
-            return
+            return False
         oscillation_values = _compute_oscillation_values(cleaned) if oscillation else None
 
         for trace_id, row in enumerate(cleaned):
@@ -56,14 +65,23 @@ def build_filter_rows(
             ):
                 continue
             selected_rows.append((run, event_id, trace_id))
+            if not unlimited:
+                emit_progress(
+                    progress,
+                    current=len(selected_rows),
+                    total=limit,
+                    unit="trace",
+                    message=f"event={event_id},trace={trace_id}",
+                )
             if not unlimited and len(selected_rows) >= limit:
-                break
+                return False
+        return None
 
     scan_cleaned_trace_batches(
         run_file,
         baseline_window_scale=baseline_window_scale,
         handler=handle_batch,
-        progress_desc="Scanning run",
+        progress=progress if unlimited else None,
     )
 
     if not selected_rows:
@@ -81,6 +99,7 @@ def build_amplitude_filter_rows(
     peak_prominence: float = 20.0,
     peak_width: float = 50.0,
     limit: int = DEFAULT_TRACE_LIMIT,
+    progress: ProgressReporter | None = None,
 ) -> np.ndarray:
     return build_filter_rows(
         trace_path=trace_path,
@@ -92,6 +111,7 @@ def build_amplitude_filter_rows(
         peak_prominence=peak_prominence,
         peak_width=peak_width,
         limit=limit,
+        progress=progress,
     )
 
 

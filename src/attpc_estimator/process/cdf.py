@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 from numba import njit
 
+from .progress import ProgressReporter
 from ..process.labeled import (
     NORMAL_LABEL_GROUPS,
     load_grouped_labeled_run,
@@ -33,6 +34,7 @@ def build_trace_cdf_histogram(
     trace_file_path: Path,
     baseline_window_scale: float = 20.0,
     thresholds: np.ndarray = CDF_THRESHOLDS,
+    progress: ProgressReporter | None = None,
 ) -> np.ndarray:
     histogram = np.zeros((len(thresholds), CDF_VALUE_BINS), dtype=np.int64)
 
@@ -45,6 +47,7 @@ def build_trace_cdf_histogram(
         trace_file_path,
         baseline_window_scale=baseline_window_scale,
         handler=handle_batch,
+        progress=progress,
     )
     return histogram
 
@@ -54,6 +57,7 @@ def build_labeled_cdf_histograms(
     workspace: Path,
     run: int,
     baseline_window_scale: float = 20.0,
+    progress: ProgressReporter | None = None,
 ) -> dict[str, np.ndarray | np.int64]:
     grouped_run = load_grouped_labeled_run(
         trace_path=trace_path, workspace=workspace, run=run
@@ -74,6 +78,7 @@ def build_labeled_cdf_histograms(
         grouped_run,
         baseline_window_scale=baseline_window_scale,
         handler=handle_batch,
+        progress=progress,
     )
 
     return {

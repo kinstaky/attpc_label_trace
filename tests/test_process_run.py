@@ -5,14 +5,24 @@ from pathlib import Path
 
 import h5py
 import numpy as np
+import pytest
 
+import attpc_estimator.utils.trace_data as trace_data
 from attpc_estimator.cli.cdf import main
 from attpc_estimator.process.cdf import (
     CDF_THRESHOLDS,
     CDF_VALUE_BINS,
     build_trace_cdf_histogram,
 )
-from attpc_estimator.utils.trace_data import preprocess_traces, sample_cdf_points
+from attpc_estimator.utils.trace_data import (
+    TraceLayout,
+    collect_event_counts,
+    detect_trace_layout,
+    load_trace_record,
+    preprocess_traces,
+    sample_cdf_points,
+)
+from tests.hdf5_fixtures import write_events_hdf5, write_legacy_hdf5
 
 
 def write_hdf5_input(path: Path) -> None:
@@ -130,6 +140,100 @@ def test_build_trace_cdf_histogram_returns_expected_shape_and_count(tmp_path) ->
     assert int(histogram.sum()) == 3 * len(CDF_THRESHOLDS)
 
 
+def test_build_trace_cdf_histogram_supports_legacy_hdf5_layout(tmp_path) -> None:
+    trace_path = tmp_path / "run_0005.h5"
+    write_legacy_hdf5(
+        trace_path,
+        {
+            1: np.asarray(
+                [
+                    [10, 11, 12, 13, 14, 1, 2, 3, 4, 5, 6, 7, 8],
+                    [20, 21, 22, 23, 24, 8, 7, 6, 5, 4, 3, 2, 1],
+                ],
+                dtype=np.float32,
+            ),
+            2: np.asarray(
+                [
+                    [30, 31, 32, 33, 34, 0, 1, 0, 1, 0, 1, 0, 1],
+                ],
+                dtype=np.float32,
+            ),
+        },
+    )
+
+    histogram = build_trace_cdf_histogram(trace_file_path=trace_path)
+
+    assert histogram.shape == (len(CDF_THRESHOLDS), CDF_VALUE_BINS)
+    assert np.all(histogram >= 0)
+    assert int(histogram.sum()) == 3 * len(CDF_THRESHOLDS)
+
+
+def test_trace_data_honors_bad_events_in_v2_layout(tmp_path) -> None:
+    trace_path = tmp_path / "run_0008.h5"
+    write_events_hdf5(
+        trace_path,
+        {
+            1: np.asarray(
+                [
+                    [10, 11, 12, 13, 14, 1, 2, 3],
+                    [20, 21, 22, 23, 24, 4, 5, 6],
+                ],
+                dtype=np.float32,
+            ),
+            2: np.asarray(
+                [
+                    [30, 31, 32, 33, 34, 7, 8, 9],
+                ],
+                dtype=np.float32,
+            ),
+        },
+        bad_events=np.asarray([2], dtype=np.int64),
+    )
+
+    with h5py.File(trace_path, "r") as handle:
+        assert detect_trace_layout(handle) is TraceLayout.MERGER_V2
+        assert collect_event_counts(handle) == [(1, 2)]
+        with pytest.raises(LookupError, match="trace 8/2"):
+            load_trace_record(
+                handle,
+                run=8,
+                event_id=2,
+                trace_id=0,
+                baseline_window_scale=20.0,
+            )
+
+
+def test_trace_data_reports_unsupported_layout(tmp_path) -> None:
+    trace_path = tmp_path / "run_0009.h5"
+    with h5py.File(trace_path, "w") as handle:
+        handle.create_group("unexpected")
+
+    with h5py.File(trace_path, "r") as handle:
+        with pytest.raises(ValueError, match="unsupported trace file layout"):
+            collect_event_counts(handle)
+
+
+def test_build_trace_cdf_histogram_does_not_require_collect_event_counts(
+    tmp_path, monkeypatch
+) -> None:
+    trace_path = tmp_path / "run_0005.h5"
+    write_hdf5_input(trace_path)
+
+    def fail_collect_event_counts(_handle: h5py.File) -> list[tuple[int, int]]:
+        raise AssertionError("collect_event_counts should not be used")
+
+    monkeypatch.setattr(
+        trace_data,
+        "collect_event_counts",
+        fail_collect_event_counts,
+    )
+
+    histogram = build_trace_cdf_histogram(trace_file_path=trace_path)
+
+    assert histogram.shape == (len(CDF_THRESHOLDS), CDF_VALUE_BINS)
+    assert int(histogram.sum()) == 3 * len(CDF_THRESHOLDS)
+
+
 def test_cdf_main_writes_default_output_file(tmp_path, monkeypatch) -> None:
     trace_path = tmp_path / "run_0006.h5"
     write_hdf5_input(trace_path)
@@ -169,6 +273,34 @@ def test_cdf_main_reads_options_from_config_file(tmp_path, monkeypatch) -> None:
     main()
 
     output_path = workspace / "run_0006_cdf.npy"
+    saved = np.load(output_path)
+    assert output_path.is_file()
+    assert saved.shape == (len(CDF_THRESHOLDS), CDF_VALUE_BINS)
+
+
+def test_cdf_main_zero_pads_integer_run_from_config_file(tmp_path, monkeypatch) -> None:
+    trace_root = tmp_path / "traces"
+    trace_root.mkdir()
+    write_hdf5_input(trace_root / "run_0106.h5")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    config_path = tmp_path / "batch.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                f'trace_path = "{trace_root}"',
+                f'workspace = "{workspace}"',
+                "run = 106",
+                "baseline_window_scale = 12.5",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(sys, "argv", ["cdf", "-c", str(config_path)])
+    main()
+
+    output_path = workspace / "run_0106_cdf.npy"
     saved = np.load(output_path)
     assert output_path.is_file()
     assert saved.shape == (len(CDF_THRESHOLDS), CDF_VALUE_BINS)

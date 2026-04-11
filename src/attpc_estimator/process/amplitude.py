@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 from scipy import signal
 
+from .progress import ProgressReporter
 from ..process.labeled import (
     NORMAL_LABEL_GROUPS,
     load_grouped_labeled_run,
@@ -30,6 +31,7 @@ def build_amplitude_histogram(
     peak_separation: float = 50.0,
     peak_prominence: float = 20.0,
     peak_width: float = 50.0,
+    progress: ProgressReporter | None = None,
 ) -> np.ndarray:
     histogram = np.zeros(AMPLITUDE_BIN_COUNT, dtype=np.int64)
 
@@ -47,6 +49,7 @@ def build_amplitude_histogram(
         trace_file_path,
         baseline_window_scale=baseline_window_scale,
         handler=handle_batch,
+        progress=progress,
     )
     return histogram
 
@@ -59,6 +62,7 @@ def build_labeled_amplitude_histograms(
     peak_separation: float = 50.0,
     peak_prominence: float = 20.0,
     peak_width: float = 50.0,
+    progress: ProgressReporter | None = None,
 ) -> dict[str, np.ndarray | np.int64]:
     grouped_run = load_grouped_labeled_run(
         trace_path=trace_path, workspace=workspace, run=run
@@ -84,6 +88,7 @@ def build_labeled_amplitude_histograms(
         grouped_run,
         baseline_window_scale=baseline_window_scale,
         handler=handle_batch,
+        progress=progress,
     )
 
     return {

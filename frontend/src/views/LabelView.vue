@@ -259,10 +259,10 @@ const deleteDialogOpen = computed({
 
 const inputModeText = computed(() => {
   if (labelStore.state.mode === "await_normal_peak") {
-    return "Waiting for normal peak selection";
+    return "Waiting for 0-9 normal peak selection";
   }
   if (labelStore.state.mode === "await_strange_choice") {
-    return "Waiting for strange label selection";
+    return "Waiting for strange shortcut selection";
   }
   return "Browse";
 });
@@ -329,13 +329,31 @@ async function onKeydown(event) {
     return;
   }
 
-  if (key === "f") {
-    event.preventDefault();
-    labelStore.toggleVisualMode();
+  if (labelStore.state.mode === "await_normal_peak") {
+    if (/^[0-9]$/.test(key)) {
+      event.preventDefault();
+      await labelStore.submitNormal(Number(key));
+    }
+    return;
+  }
+
+  if (labelStore.state.mode === "await_strange_choice") {
+    const strangeMatch = strangeLabels.value.find(
+      (item) => item.shortcutKey?.toLowerCase() === key,
+    );
+    if (strangeMatch) {
+      event.preventDefault();
+      await labelStore.submitStrange(strangeMatch.name);
+    }
     return;
   }
 
   if (labelStore.state.mode === "browse") {
+    if (key === "f") {
+      event.preventDefault();
+      labelStore.toggleVisualMode();
+      return;
+    }
     if (key === "arrowleft" || key === "h") {
       event.preventDefault();
       labelStore.setMode("await_normal_peak");
@@ -358,24 +376,6 @@ async function onKeydown(event) {
     if (key === "arrowdown" || key === "j") {
       event.preventDefault();
       await labelStore.navigate(1);
-    }
-    return;
-  }
-
-  if (labelStore.state.mode === "await_normal_peak" && /^[0-9]$/.test(key)) {
-    event.preventDefault();
-    await labelStore.submitNormal(Number(key));
-    return;
-  }
-
-  if (labelStore.state.mode === "await_strange_choice") {
-    const strangeMatch = strangeLabels.value.find(
-      (item) => item.shortcutKey?.toLowerCase() === key,
-    );
-    if (strangeMatch) {
-      event.preventDefault();
-      await labelStore.submitStrange(strangeMatch.name);
-      return;
     }
   }
 }

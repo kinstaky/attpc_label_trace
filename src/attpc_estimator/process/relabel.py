@@ -4,8 +4,9 @@ from pathlib import Path
 
 import numpy as np
 
-from ..process.amplitude import max_peak_amplitude
-from ..storage.labeled_traces import _read_labeled_trace_rows
+from ..storage.labeled_traces import iter_labeled_trace_batches
+from .amplitude import max_peak_amplitude
+from .progress import ProgressReporter, emit_progress
 from ..utils.trace_data import (
     compute_frequency_distribution,
     preprocess_traces,
@@ -33,49 +34,89 @@ def build_relabel_rows(
     peak_separation: float = 50.0,
     peak_prominence: float = 20.0,
     peak_width: float = 50.0,
+    progress: ProgressReporter | None = None,
 ) -> tuple[np.ndarray, dict[str, tuple[int, int]]]:
     validate_relabel_label(label)
-    traces, labeled_rows = _read_labeled_trace_rows(
+    batches, total_traces = iter_labeled_trace_batches(
         trace_path=trace_path,
         workspace_path=workspace,
         run=run,
     )
-
-    if len(labeled_rows) == 0:
+    if total_traces == 0:
+        emit_progress(
+            progress,
+            current=0,
+            total=0,
+            unit="trace",
+        )
         return _build_structured_rows([], []), _build_ratio_metrics(label, [], [])
 
-    cleaned = preprocess_traces(traces, baseline_window_scale=baseline_window_scale)
-    old_labels = [row.label_key for row in labeled_rows]
-    if label == NOISE_RELABEL:
-        amplitudes = np.asarray(
-            [
-                max_peak_amplitude(
-                    row=trace,
-                    peak_separation=peak_separation,
-                    peak_prominence=peak_prominence,
-                    peak_width=peak_width,
-                )
-                for trace in cleaned
-            ],
-            dtype=np.float32,
+    processed_traces = 0
+    ordered_rows = []
+    new_labels: list[str] = []
+    old_labels: list[str] = []
+    emit_progress(
+        progress,
+        current=0,
+        total=total_traces,
+        unit="trace",
+    )
+
+    for event_rows, traces in batches:
+        cleaned = preprocess_traces(
+            traces,
+            baseline_window_scale=baseline_window_scale,
         )
-        new_labels = [
-            _relabel_noise(old_label=old_label, amplitude=float(amplitude))
-            for old_label, amplitude in zip(old_labels, amplitudes, strict=True)
-        ]
-    elif label == OSCILLATION_RELABEL:
-        spectrum = compute_frequency_distribution(cleaned)
-        f60 = sample_cdf_points(
-            spectrum,
-            thresholds=np.asarray([CDF_BIN], dtype=np.int64),
-        )[:, 0]
-        new_labels = [
-            _relabel_oscillation(old_label=old_label, f60_value=float(f60_value))
-            for old_label, f60_value in zip(old_labels, f60, strict=True)
-        ]
-    else:
-        raise ValueError(f"unsupported relabel label: {label}")
-    return _build_structured_rows(labeled_rows, new_labels), _build_ratio_metrics(
+        batch_old_labels = [row.label_key for row in event_rows]
+        if label == NOISE_RELABEL:
+            amplitudes = np.asarray(
+                [
+                    max_peak_amplitude(
+                        row=trace,
+                        peak_separation=peak_separation,
+                        peak_prominence=peak_prominence,
+                        peak_width=peak_width,
+                    )
+                    for trace in cleaned
+                ],
+                dtype=np.float32,
+            )
+            batch_new_labels = [
+                _relabel_noise(old_label=old_label, amplitude=float(amplitude))
+                for old_label, amplitude in zip(
+                    batch_old_labels, amplitudes, strict=True
+                )
+            ]
+        elif label == OSCILLATION_RELABEL:
+            spectrum = compute_frequency_distribution(cleaned)
+            f60 = sample_cdf_points(
+                spectrum,
+                thresholds=np.asarray([CDF_BIN], dtype=np.int64),
+            )[:, 0]
+            batch_new_labels = [
+                _relabel_oscillation(old_label=old_label, f60_value=float(f60_value))
+                for old_label, f60_value in zip(batch_old_labels, f60, strict=True)
+            ]
+        else:
+            raise ValueError(f"unsupported relabel label: {label}")
+
+        ordered_rows.extend(event_rows)
+        old_labels.extend(batch_old_labels)
+        new_labels.extend(batch_new_labels)
+        processed_traces += len(event_rows)
+        emit_progress(
+            progress,
+            current=processed_traces,
+            total=total_traces,
+            unit="trace",
+            message=(
+                f"run={event_rows[0].run},event={event_rows[0].event_id}"
+                if event_rows
+                else ""
+            ),
+        )
+
+    return _build_structured_rows(ordered_rows, new_labels), _build_ratio_metrics(
         label,
         old_labels,
         new_labels,

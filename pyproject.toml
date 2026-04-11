@@ -18,7 +18,7 @@ dependencies = [
   "numpy>=2.4.3",
   "scipy>=1.17.1",
   "tqdm>=4.67,<5.0",
-  "uvicorn>=0.30,<1.0",
+  "uvicorn[standard]>=0.30,<1.0",
 ]
 
 [project.optional-dependencies]
@@ -30,7 +30,7 @@ dev = [
 amplitude = "attpc_estimator.cli.amplitude:main"
 cdf = "attpc_estimator.cli.cdf:main"
 filter = "attpc_estimator.cli.filter:main"
-relabel-labeled = "attpc_estimator.cli.estimate_relabel:main"
+relabel = "attpc_estimator.cli.relabel:main"
 webui = "attpc_estimator.cli.webui:main"
 
 [tool.pytest.ini_options]

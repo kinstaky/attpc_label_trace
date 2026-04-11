@@ -8,11 +8,12 @@ import numpy as np
 import pytest
 
 from attpc_estimator.cli.amplitude import main as find_peaks_main
-from attpc_estimator.cli.estimate_relabel import main as relabel_main
-from attpc_estimator.process.estimate_relabel import build_relabel_rows
 from attpc_estimator.storage.labels_db import LabelRepository
 from attpc_estimator.process.amplitude import build_labeled_amplitude_histograms
+from attpc_estimator.process.relabel import build_relabel_rows
+from attpc_estimator.cli.relabel import main as relabel_main
 from attpc_estimator.storage.labeled_traces import read_labeled_trace
+from tests.hdf5_fixtures import write_legacy_hdf5
 
 
 def _oscillation_trace() -> np.ndarray:
@@ -119,6 +120,32 @@ def test_read_labeled_trace_returns_storage_keys_for_selected_run_and_all_runs(
     assert all_labels == labels_run8 + ["normal:1"]
 
 
+def test_read_labeled_trace_supports_legacy_trace_layout(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    write_legacy_hdf5(
+        workspace / "run_0008.h5",
+        {
+            1: _pad_rows([_oscillation_trace(), _low_amplitude_trace(), _high_amplitude_trace()]),
+            2: _pad_rows([_oscillating_peak_trace(), _low_amplitude_trace()]),
+        },
+    )
+    seed_workspace_db(workspace)
+
+    traces, labels = read_labeled_trace(
+        trace_path=workspace, workspace_path=workspace, run=8
+    )
+
+    assert traces.shape == (5, 256)
+    assert labels == [
+        "strange:oscillation",
+        "normal:1",
+        "normal:1",
+        "normal:1",
+        "normal:0",
+    ]
+
+
 def test_read_labeled_trace_uses_labels_db_filename(tmp_path) -> None:
     workspace = make_workspace(tmp_path)
 
@@ -189,6 +216,24 @@ def test_build_relabel_rows_oscillation_applies_f60_rule_and_reports_oscillation
     assert metrics["normal1_to_oscillation"] == (1, 3)
 
 
+def test_build_relabel_rows_reports_trace_progress(tmp_path) -> None:
+    workspace = make_workspace(tmp_path)
+    progress_updates = []
+
+    rows, _ = build_relabel_rows(
+        trace_path=workspace,
+        workspace=workspace,
+        run=8,
+        label="noise",
+        progress=progress_updates.append,
+    )
+
+    assert len(rows) == 5
+    assert [update.current for update in progress_updates] == [0, 3, 5]
+    assert all(update.total == 5 for update in progress_updates)
+    assert all(update.unit == "trace" for update in progress_updates)
+
+
 def test_relabel_main_noise_writes_rows_and_prints_noise_ratios(
     tmp_path, monkeypatch, capsys
 ) -> None:
@@ -198,7 +243,7 @@ def test_relabel_main_noise_writes_rows_and_prints_noise_ratios(
         sys,
         "argv",
         [
-            "relabel-labeled",
+            "relabel",
             "-t",
             str(workspace),
             "-w",
@@ -239,7 +284,7 @@ def test_relabel_main_oscillation_writes_rows_and_prints_oscillation_ratios(
         sys,
         "argv",
         [
-            "relabel-labeled",
+            "relabel",
             "-t",
             str(workspace),
             "-w",
@@ -273,6 +318,39 @@ def test_relabel_main_oscillation_writes_rows_and_prints_oscillation_ratios(
     assert "old normal:1 -> new strange:oscillation: 1/3 = 0.333333" in stdout
 
 
+def test_relabel_main_zero_pads_integer_run_from_config_file(
+    tmp_path, monkeypatch
+) -> None:
+    workspace = make_workspace(tmp_path)
+    config_path = tmp_path / "relabel.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                f'trace_path = "{workspace}"',
+                f'workspace = "{workspace}"',
+                "run = 8",
+                'label = "noise"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(sys, "argv", ["relabel", "-c", str(config_path)])
+    relabel_main()
+
+    output_path = workspace / "run_0008_labeled_relabel.npy"
+    saved = np.load(output_path)
+
+    assert output_path.is_file()
+    assert saved["new_label"].tolist() == [
+        "strange:oscillation",
+        "normal:0",
+        "normal:1",
+        "normal:1",
+        "normal:0",
+    ]
+
+
 def test_relabel_main_requires_label_option(tmp_path, monkeypatch, capsys) -> None:
     workspace = make_workspace(tmp_path)
 
@@ -280,7 +358,7 @@ def test_relabel_main_requires_label_option(tmp_path, monkeypatch, capsys) -> No
         sys,
         "argv",
         [
-            "relabel-labeled",
+            "relabel",
             "-t",
             str(workspace),
             "-w",
@@ -306,7 +384,7 @@ def test_relabel_main_saturation_is_not_implemented(
         sys,
         "argv",
         [
-            "relabel-labeled",
+            "relabel",
             "-t",
             str(workspace),
             "-w",
@@ -390,3 +468,30 @@ def test_find_peaks_main_labeled_writes_payload_npz(tmp_path, monkeypatch) -> No
     ]
     assert payload["trace_counts"].tolist() == [1, 3, 0, 0, 0, 1]
     assert int(payload["histograms"][1].sum()) == 5
+
+
+def test_find_peaks_main_zero_pads_integer_run_from_config_file(
+    tmp_path, monkeypatch
+) -> None:
+    workspace = make_workspace(tmp_path)
+    config_path = tmp_path / "amplitude.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                f'trace_path = "{workspace}"',
+                f'workspace = "{workspace}"',
+                "run = 8",
+                "labeled = true",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(sys, "argv", ["find-peak", "-c", str(config_path)])
+    find_peaks_main()
+
+    output_path = workspace / "run_0008_labeled_amp.npz"
+    payload = np.load(output_path)
+
+    assert output_path.is_file()
+    assert payload["trace_counts"].tolist() == [1, 3, 0, 0, 0, 1]

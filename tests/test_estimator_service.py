@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from attpc_estimator.service.estimator import EstimatorService
+from tests.hdf5_fixtures import write_legacy_hdf5
 
 
 def write_hdf5_input(path) -> None:
@@ -162,6 +163,36 @@ def test_label_and_review_stacks_are_independent(tmp_path) -> None:
     )
 
 
+def test_label_mode_keeps_forward_stack_stable_after_relabel(tmp_path) -> None:
+    random.seed(7)
+    trace_path = tmp_path / "run_0009.h5"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    write_hdf5_input(trace_path)
+
+    service = EstimatorService(trace_path=trace_path, workspace=workspace)
+
+    first = service.set_session(mode="label", run=9)["trace"]
+    second = service.next_trace()
+    third = service.next_trace()
+
+    rewound = service.previous_trace()
+    assert (rewound["eventId"], rewound["traceId"]) == (second["eventId"], second["traceId"])
+
+    service.assign_label(
+        event_id=rewound["eventId"],
+        trace_id=rewound["traceId"],
+        family="normal",
+        label="2",
+    )
+
+    next_after_relabel = service.next_trace()
+    assert (next_after_relabel["eventId"], next_after_relabel["traceId"]) == (
+        third["eventId"],
+        third["traceId"],
+    )
+
+
 def test_review_mode_rejects_empty_selection(tmp_path) -> None:
     trace_path = tmp_path / "run_0003.h5"
     workspace = tmp_path / "workspace"
@@ -232,6 +263,78 @@ def test_trace_payload_includes_transformed_trace(tmp_path) -> None:
         payload["transformed"],
         np.abs(np.fft.rfft(payload["trace"])),
     )
+
+
+def test_label_mode_supports_legacy_trace_layout(tmp_path) -> None:
+    trace_path = tmp_path / "run_0004.h5"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    write_legacy_hdf5(
+        trace_path,
+        {
+            1: np.asarray(
+                [
+                    [10, 11, 12, 13, 14, 1, 2, 3],
+                    [20, 21, 22, 23, 24, 4, 5, 6],
+                ],
+                dtype=np.float32,
+            )
+        },
+    )
+
+    service = EstimatorService(trace_path=trace_path, workspace=workspace)
+    try:
+        payload = service.set_session(mode="label", run=4)["trace"]
+        assert payload["run"] == 4
+        assert payload["eventId"] == 1
+        assert payload["traceId"] in {0, 1}
+        assert len(payload["raw"]) == 3
+        assert len(payload["trace"]) == 3
+    finally:
+        service.close()
+
+
+def test_service_bootstrap_uses_requested_default_run(tmp_path) -> None:
+    trace_root = tmp_path / "traces"
+    trace_root.mkdir()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    write_hdf5_input(trace_root / "run_0004.h5")
+    write_hdf5_input(trace_root / "run_0006.h5")
+
+    service = EstimatorService(
+        trace_path=trace_root,
+        workspace=workspace,
+        default_run=6,
+    )
+    try:
+        bootstrap = service.bootstrap_state()
+        assert bootstrap["runs"] == [4, 6]
+        assert bootstrap["session"] == {
+            "mode": "label",
+            "run": 6,
+            "source": None,
+            "family": None,
+            "label": None,
+            "filterFile": None,
+        }
+    finally:
+        service.close()
+
+
+def test_service_rejects_missing_requested_default_run(tmp_path) -> None:
+    trace_root = tmp_path / "traces"
+    trace_root.mkdir()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    write_hdf5_input(trace_root / "run_0004.h5")
+
+    with pytest.raises(ValueError, match="default run 6 is not available"):
+        EstimatorService(
+            trace_path=trace_root,
+            workspace=workspace,
+            default_run=6,
+        )
 
 
 def test_delete_strange_label_rejects_labels_with_traces(tmp_path) -> None:

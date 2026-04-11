@@ -9,6 +9,7 @@ import numpy as np
 from attpc_estimator.cli.cdf import main
 from attpc_estimator.storage.labels_db import LabelRepository
 from attpc_estimator.process.cdf import build_labeled_cdf_histograms
+from tests.hdf5_fixtures import write_legacy_hdf5
 
 
 def write_hdf5_input(path: Path, traces: np.ndarray) -> None:
@@ -83,6 +84,39 @@ def test_build_labeled_cdf_histograms_filters_selected_run(tmp_path) -> None:
         "Burst",
         "Noise",
     ]
+    assert payload["trace_counts"].tolist() == [1, 0, 0, 0, 1, 0, 1]
+
+
+def test_build_labeled_cdf_histograms_supports_legacy_trace_layout(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    trace_root = tmp_path / "traces"
+    trace_root.mkdir()
+    write_legacy_hdf5(
+        trace_root / "run_0008.h5",
+        {
+            1: np.array(
+                [
+                    [10, 11, 12, 13, 14, 1, 2, 3, 4, 5, 6, 7, 8],
+                    [20, 21, 22, 23, 24, 8, 7, 6, 5, 4, 3, 2, 1],
+                ],
+                dtype=np.float32,
+            ),
+            2: np.array(
+                [
+                    [30, 31, 32, 33, 34, 0, 1, 0, 1, 0, 1, 0, 1],
+                ],
+                dtype=np.float32,
+            ),
+        },
+    )
+    seed_labels(workspace)
+
+    payload = build_labeled_cdf_histograms(
+        trace_path=trace_root, workspace=workspace, run=8
+    )
+
+    assert payload["run_id"] == 8
     assert payload["trace_counts"].tolist() == [1, 0, 0, 0, 1, 0, 1]
 
 

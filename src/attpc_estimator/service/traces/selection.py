@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import logging
 from pathlib import Path
 import random
+import time
 
 import h5py
 import numpy as np
@@ -10,9 +12,13 @@ import numpy as np
 from ...model.label import StoredLabel
 from ...model.trace import TraceRef
 from ...storage.run_paths import extract_run_id
-from ...utils.trace_data import collect_event_counts
+from ...utils.trace_data import collect_event_counts, describe_trace_events, event_trace_count
 
 MAX_RANDOM_TRACE_ATTEMPTS = 1024
+FULL_SCAN_EVENT_THRESHOLD = 200
+SEQUENTIAL_EVENT_FALLBACK_LIMIT = 32
+
+logger = logging.getLogger("attpc_estimator.selection")
 
 
 def match_review_label(
@@ -86,20 +92,41 @@ class RandomUnlabeledSelector:
     clamp_at_end = False
     empty_message = "no unlabeled trace was found after repeated random sampling"
 
-    def __init__(self, trace_file: Path) -> None:
+    def __init__(self, trace_file: Path, *, verbose: bool = False) -> None:
         self.trace_file = trace_file
         self.run = extract_run_id(trace_file)
-        with h5py.File(trace_file, "r") as handle:
-            events = handle["events"]
-            min_event = int(events.attrs["min_event"])
-            max_event = int(events.attrs["max_event"])
-            bad_events = {int(event_id) for event_id in events.attrs["bad_events"]}
-            self._event_counts = collect_event_counts(
-                events,
-                min_event=min_event,
-                max_event=max_event,
-                bad_events=bad_events,
-            )
+        self.verbose = verbose
+        self._event_counts: list[tuple[int, int]] = []
+        self._event_count_cache: dict[int, int] = {}
+        self._handle: h5py.File | None = None
+
+        started = time.perf_counter()
+        handle = h5py.File(trace_file, "r")
+        metadata = describe_trace_events(handle)
+        self._layout = metadata.layout
+        self._min_event = metadata.min_event
+        self._max_event = metadata.max_event
+        self._bad_events = set(metadata.bad_events)
+        self._strategy = (
+            "full_scan"
+            if metadata.valid_event_span <= FULL_SCAN_EVENT_THRESHOLD
+            else "sparse_random"
+        )
+        if self._strategy == "full_scan":
+            self._event_counts = collect_event_counts(handle)
+            handle.close()
+        else:
+            self._handle = handle
+        self._debug(
+            "selector init run=%s layout=%s strategy=%s events=%s-%s bad=%s took=%.3fs",
+            self.run,
+            self._layout.value,
+            self._strategy,
+            self._min_event,
+            self._max_event,
+            len(self._bad_events),
+            time.perf_counter() - started,
+        )
 
     def initial_refs(self, labels: Mapping[TraceRef, StoredLabel]) -> list[TraceRef]:
         return []
@@ -114,18 +141,41 @@ class RandomUnlabeledSelector:
         additions: list[TraceRef] = []
         excluded_refs = set(existing)
         labeled_refs = {ref for ref in labels if ref.run == self.run}
+        started = time.perf_counter()
+        total_event_probes = 0
+        total_trace_probes = 0
         while len(existing) + len(additions) < target_size:
             try:
-                ref = random_unlabeled_ref(
-                    run=self.run,
-                    event_counts=self._event_counts,
-                    labeled_refs=labeled_refs,
-                    excluded_refs=excluded_refs,
-                )
+                if self._strategy == "full_scan":
+                    ref = random_unlabeled_ref(
+                        run=self.run,
+                        event_counts=self._event_counts,
+                        labeled_refs=labeled_refs,
+                        excluded_refs=excluded_refs,
+                    )
+                    event_probes = 1
+                    trace_probes = 1
+                else:
+                    ref, event_probes, trace_probes = self._random_sparse_ref(
+                        labeled_refs=labeled_refs,
+                        excluded_refs=excluded_refs,
+                    )
             except LookupError:
                 break
             additions.append(ref)
             excluded_refs.add(ref)
+            total_event_probes += event_probes
+            total_trace_probes += trace_probes
+        if additions:
+            self._debug(
+                "selector filled %s refs run=%s strategy=%s event_probes=%s trace_probes=%s took=%.3fs",
+                len(additions),
+                self.run,
+                self._strategy,
+                total_event_probes,
+                total_trace_probes,
+                time.perf_counter() - started,
+            )
         return additions
 
     def on_label_updated(
@@ -137,11 +187,70 @@ class RandomUnlabeledSelector:
         pointer: int,
         labels: Mapping[TraceRef, StoredLabel],
     ) -> list[TraceRef] | None:
-        history_size = min(pointer + 1, len(existing))
-        history = existing[:history_size]
-        future = [candidate for candidate in existing[history_size:] if candidate not in labels]
-        rebuilt = history + future
-        return rebuilt if rebuilt != existing else None
+        # Keep the already-generated label-mode history stable when a user rewinds and
+        # relabels an earlier trace. Newly appended refs are still filtered in
+        # ensure_forward_size() against the current labels map.
+        return None
+
+    def close(self) -> None:
+        if self._handle is not None:
+            self._handle.close()
+            self._handle = None
+
+    def _random_sparse_ref(
+        self,
+        *,
+        labeled_refs: set[TraceRef],
+        excluded_refs: set[TraceRef],
+    ) -> tuple[TraceRef, int, int]:
+        if self._min_event > self._max_event:
+            raise LookupError("no unlabeled trace was found after repeated random sampling")
+
+        total_event_probes = 0
+        total_trace_probes = 0
+        event_span = self._max_event - self._min_event + 1
+        fallback_limit = min(event_span, SEQUENTIAL_EVENT_FALLBACK_LIMIT)
+
+        for _ in range(MAX_RANDOM_TRACE_ATTEMPTS):
+            seed_event = random.randint(self._min_event, self._max_event)
+            for event_offset in range(fallback_limit):
+                event_id = self._wrap_event(seed_event + event_offset)
+                total_event_probes += 1
+                if event_id in self._bad_events:
+                    continue
+                trace_count = self._get_event_trace_count(event_id)
+                if trace_count <= 0:
+                    continue
+                start_trace = random.randrange(trace_count) if event_offset == 0 else 0
+                for trace_offset in range(trace_count):
+                    trace_id = (start_trace + trace_offset) % trace_count
+                    total_trace_probes += 1
+                    ref = TraceRef(run=self.run, event_id=event_id, trace_id=trace_id)
+                    if ref in labeled_refs or ref in excluded_refs:
+                        continue
+                    return ref, total_event_probes, total_trace_probes
+
+        raise LookupError("no unlabeled trace was found after repeated random sampling")
+
+    def _get_event_trace_count(self, event_id: int) -> int:
+        cached = self._event_count_cache.get(event_id)
+        if cached is not None:
+            return cached
+        if self._handle is None:
+            return 0
+        count = event_trace_count(self._handle, event_id)
+        self._event_count_cache[event_id] = count
+        return count
+
+    def _wrap_event(self, event_id: int) -> int:
+        event_span = self._max_event - self._min_event + 1
+        if event_span <= 0:
+            return self._min_event
+        return self._min_event + ((event_id - self._min_event) % event_span)
+
+    def _debug(self, message: str, *args: object) -> None:
+        if self.verbose:
+            logger.debug(message, *args)
 
 
 class LabeledReviewSelector:
@@ -186,6 +295,9 @@ class LabeledReviewSelector:
             label=self.label,
         )
 
+    def close(self) -> None:
+        return None
+
 
 class FilterRowsSelector:
     clamp_at_end = True
@@ -215,4 +327,7 @@ class FilterRowsSelector:
         pointer: int,
         labels: Mapping[TraceRef, StoredLabel],
     ) -> list[TraceRef] | None:
+        return None
+
+    def close(self) -> None:
         return None

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import logging
 from pathlib import Path
+import time
 
 import numpy as np
 
@@ -19,6 +21,7 @@ from .selection import (
 )
 
 CACHE_RADIUS = 5
+logger = logging.getLogger("attpc_estimator.trace_source")
 
 
 class TraceSource:
@@ -30,11 +33,13 @@ class TraceSource:
         labels: Mapping[TraceRef, StoredLabel] | None = None,
         baseline_window_scale: float = 10.0,
         prefetch_radius: int = CACHE_RADIUS,
+        verbose: bool = False,
     ) -> None:
         self.run_files = {int(run): path.resolve() for run, path in run_files.items()}
         self.selector = selector
         self.baseline_window_scale = baseline_window_scale
         self.prefetch_radius = prefetch_radius
+        self.verbose = verbose
         self._labels = dict(labels or {})
         self._navigator = Navigator(
             review_mode=isinstance(selector, (LabeledReviewSelector, FilterRowsSelector))
@@ -55,15 +60,17 @@ class TraceSource:
         labels: Mapping[TraceRef, StoredLabel] | None = None,
         baseline_window_scale: float = 10.0,
         prefetch_radius: int = CACHE_RADIUS,
+        verbose: bool = False,
     ) -> TraceSource:
         trace_file_resolved = trace_file.resolve()
         run = extract_run_id(trace_file_resolved)
         return cls(
             run_files={run: trace_file_resolved},
-            selector=RandomUnlabeledSelector(trace_file_resolved),
+            selector=RandomUnlabeledSelector(trace_file_resolved, verbose=verbose),
             labels=labels,
             baseline_window_scale=baseline_window_scale,
             prefetch_radius=prefetch_radius,
+            verbose=verbose,
         )
 
     @classmethod
@@ -76,6 +83,7 @@ class TraceSource:
         labels: Mapping[TraceRef, StoredLabel] | None = None,
         baseline_window_scale: float = 10.0,
         prefetch_radius: int = CACHE_RADIUS,
+        verbose: bool = False,
     ) -> TraceSource:
         trace_file_resolved = trace_file.resolve()
         run = extract_run_id(trace_file_resolved)
@@ -85,6 +93,7 @@ class TraceSource:
             labels=labels,
             baseline_window_scale=baseline_window_scale,
             prefetch_radius=prefetch_radius,
+            verbose=verbose,
         )
 
     @classmethod
@@ -96,6 +105,7 @@ class TraceSource:
         labels: Mapping[TraceRef, StoredLabel] | None = None,
         baseline_window_scale: float = 10.0,
         prefetch_radius: int = CACHE_RADIUS,
+        verbose: bool = False,
     ) -> TraceSource:
         run_files = (
             {int(run): path.resolve() for run, path in trace_path.items()}
@@ -111,6 +121,7 @@ class TraceSource:
             labels=labels,
             baseline_window_scale=baseline_window_scale,
             prefetch_radius=prefetch_radius,
+            verbose=verbose,
         )
 
     @property
@@ -127,6 +138,7 @@ class TraceSource:
         return len(self._navigator.stack)
 
     def next_trace(self) -> TraceRecord:
+        started = time.perf_counter()
         self._ensure_forward_capacity(self._navigator.index + self.prefetch_radius + 2)
         try:
             ref = self._navigator.next_ref(clamp_at_end=self.selector.clamp_at_end)
@@ -134,6 +146,14 @@ class TraceSource:
             raise LookupError(self.selector.empty_message) from exc
         record = self._require_trace(ref)
         self._schedule_prefetch()
+        if self.verbose:
+            logger.debug(
+                "trace_source next_trace run=%s event=%s trace=%s took=%.3fs",
+                record.run,
+                record.event_id,
+                record.trace_id,
+                time.perf_counter() - started,
+            )
         return record
 
     def previous_trace(self) -> TraceRecord:
@@ -185,6 +205,7 @@ class TraceSource:
     def close(self) -> None:
         self._prefetcher.close()
         self._loader.close()
+        self.selector.close()
 
     def _wait_for_prefetch(self, timeout: float = 1.0) -> bool:
         return self._prefetcher.wait(timeout=timeout)

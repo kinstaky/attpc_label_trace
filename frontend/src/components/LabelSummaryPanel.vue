@@ -12,9 +12,8 @@
         <h2>{{ title }}</h2>
       </div>
 
-      <div class="summary-panel-actions">
+      <div v-if="showReviewAll" class="summary-panel-actions">
         <v-btn
-          v-if="showReviewAll"
           color="primary"
           size="small"
           variant="tonal"
@@ -22,14 +21,6 @@
         >
           Review all
         </v-btn>
-        <v-btn
-          v-if="allowAdd"
-          color="secondary"
-          icon="mdi-plus"
-          size="small"
-          variant="tonal"
-          @click="$emit('add')"
-        />
       </div>
     </div>
 
@@ -75,6 +66,25 @@
       >
         No items to show yet.
       </v-alert>
+
+      <v-card
+        v-if="allowAdd"
+        class="summary-panel-card summary-panel-card--add"
+        rounded="xl"
+        variant="outlined"
+      >
+        <button
+          type="button"
+          class="summary-panel-card-button summary-panel-card-button--add"
+          @click="$emit('add')"
+        >
+          <div class="summary-panel-card-copy">
+            <strong>Add strange label</strong>
+            <span>Set name and shortcut key</span>
+          </div>
+          <v-icon icon="mdi-plus" size="20" />
+        </button>
+      </v-card>
     </div>
   </aside>
 </template>

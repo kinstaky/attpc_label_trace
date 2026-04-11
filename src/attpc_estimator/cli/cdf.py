@@ -11,11 +11,12 @@ from ..process.cdf import (
     build_labeled_cdf_histograms,
     build_trace_cdf_histogram,
 )
-from ..storage.run_paths import resolve_run_file
+from ..storage.run_paths import format_run_id, resolve_run_file
 from .config import (
     parse_run,
     parse_toml_config,
 )
+from .progress import tqdm_reporter
 
 
 def main() -> None:
@@ -24,15 +25,18 @@ def main() -> None:
     workspace = Path(args.workspace).expanduser().resolve()
     run_token = args.run
     run_id = int(run_token)
+    run_name = format_run_id(run_id)
 
     if args.labeled:
-        payload = build_labeled_cdf_histograms(
-            trace_path=trace_root,
-            workspace=workspace,
-            run=run_id,
-            baseline_window_scale=args.baseline_window_scale,
-        )
-        output_path = workspace / f"run_{run_token}_labeled_cdf.npz"
+        with tqdm_reporter("Processing labeled pad traces") as progress:
+            payload = build_labeled_cdf_histograms(
+                trace_path=trace_root,
+                workspace=workspace,
+                run=run_id,
+                baseline_window_scale=args.baseline_window_scale,
+                progress=progress,
+            )
+        output_path = workspace / f"run_{run_name}_labeled_cdf.npz"
         output_path.parent.mkdir(parents=True, exist_ok=True)
         np.savez(
             output_path,
@@ -54,11 +58,13 @@ def main() -> None:
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
 
-    histogram = build_trace_cdf_histogram(
-        trace_file_path=trace_file_path,
-        baseline_window_scale=args.baseline_window_scale,
-    )
-    output_path = workspace / f"run_{run_token}_cdf.npy"
+    with tqdm_reporter("Processing pad traces") as progress:
+        histogram = build_trace_cdf_histogram(
+            trace_file_path=trace_file_path,
+            baseline_window_scale=args.baseline_window_scale,
+            progress=progress,
+        )
+    output_path = workspace / f"run_{run_name}_cdf.npy"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     np.save(output_path, histogram)
 

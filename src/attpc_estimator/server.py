@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -30,6 +31,14 @@ class SessionRequest(BaseModel):
     family: str | None = None
     label: str | None = None
     filterFile: str | None = None
+
+
+class HistogramJobRequest(BaseModel):
+    metric: str
+    mode: str
+    run: int
+    filterFile: str | None = None
+    veto: bool = False
 
 
 def create_app(service: EstimatorService, frontend_dist: Path) -> FastAPI:
@@ -112,7 +121,11 @@ def build_api_router(service: EstimatorService) -> APIRouter:
 
     @router.get("/histograms")
     def histogram(
-        metric: str, mode: str, run: int, filterFile: str | None = None
+        metric: str,
+        mode: str,
+        run: int,
+        filterFile: str | None = None,
+        veto: bool = False,
     ) -> dict:
         try:
             return service.get_histogram(
@@ -120,11 +133,53 @@ def build_api_router(service: EstimatorService) -> APIRouter:
                 mode=mode,
                 run=run,
                 filter_file=filterFile,
+                veto=veto,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @router.post("/histograms/jobs")
+    def create_histogram_job(request: HistogramJobRequest) -> dict[str, str]:
+        try:
+            return service.create_histogram_job(
+                metric=request.metric,
+                mode=request.mode,
+                run=request.run,
+                filter_file=request.filterFile,
+                veto=request.veto,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @router.websocket("/histograms/jobs/{job_id}")
+    async def histogram_job_socket(websocket: WebSocket, job_id: str) -> None:
+        await websocket.accept()
+        message_index = 0
+        try:
+            while True:
+                try:
+                    next_message = await asyncio.to_thread(
+                        service.next_histogram_job_message,
+                        job_id=job_id,
+                        after_index=message_index,
+                    )
+                except LookupError:
+                    await websocket.send_json(
+                        {"type": "error", "detail": f"histogram job not found: {job_id}"}
+                    )
+                    return
+                if next_message is None:
+                    return
+                message_index, payload = next_message
+                await websocket.send_json(payload)
+                if payload["type"] in {"complete", "error"}:
+                    return
+        except WebSocketDisconnect:
+            return
 
     return router
 

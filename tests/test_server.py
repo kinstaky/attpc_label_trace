@@ -14,6 +14,26 @@ from attpc_estimator.server import create_app
 class DummyMergedService:
     def __init__(self) -> None:
         self.closed = False
+        self.histogram_job_messages = [
+            {
+                "type": "progress",
+                "current": 1,
+                "total": 4,
+                "percent": 25,
+                "unit": "trace",
+                "message": "event=1",
+            },
+            {
+                "type": "complete",
+                "payload": {
+                    "metric": "cdf",
+                    "mode": "filtered",
+                    "run": 8,
+                    "filterFile": "filter.npy",
+                    "veto": True,
+                },
+            },
+        ]
 
     def close(self) -> None:
         self.closed = True
@@ -66,14 +86,44 @@ class DummyMergedService:
         return {"deleted": label}
 
     def get_histogram(
-        self, *, metric: str, mode: str, run: int, filter_file: str | None = None
+        self,
+        *,
+        metric: str,
+        mode: str,
+        run: int,
+        filter_file: str | None = None,
+        veto: bool = False,
     ) -> dict:
         return {
             "metric": metric,
             "mode": mode,
             "run": run,
             "filterFile": filter_file,
+            "veto": veto,
         }
+
+    def create_histogram_job(
+        self,
+        *,
+        metric: str,
+        mode: str,
+        run: int,
+        filter_file: str | None = None,
+        veto: bool = False,
+    ) -> dict:
+        return {"jobId": "job-1"}
+
+    def next_histogram_job_message(
+        self,
+        *,
+        job_id: str,
+        after_index: int,
+    ) -> tuple[int, dict] | None:
+        if job_id != "job-1":
+            raise LookupError(f"histogram job not found: {job_id}")
+        if after_index >= len(self.histogram_job_messages):
+            return None
+        return after_index + 1, self.histogram_job_messages[after_index]
 
 
 def test_create_app_routes_and_fallback(tmp_path: Path) -> None:
@@ -124,7 +174,41 @@ def test_create_app_routes_and_fallback(tmp_path: Path) -> None:
             "mode": "all",
             "run": 8,
             "filterFile": None,
+            "veto": False,
         }
+
+        histogram_job = client.post(
+            "/api/histograms/jobs",
+            json={
+                "metric": "cdf",
+                "mode": "filtered",
+                "run": 8,
+                "filterFile": "filter.npy",
+                "veto": True,
+            },
+        )
+        assert histogram_job.status_code == 200
+        assert histogram_job.json() == {"jobId": "job-1"}
+
+        with client.websocket_connect("/api/histograms/jobs/job-1") as websocket:
+            assert websocket.receive_json() == {
+                "type": "progress",
+                "current": 1,
+                "total": 4,
+                "percent": 25,
+                "unit": "trace",
+                "message": "event=1",
+            }
+            assert websocket.receive_json() == {
+                "type": "complete",
+                "payload": {
+                    "metric": "cdf",
+                    "mode": "filtered",
+                    "run": 8,
+                    "filterFile": "filter.npy",
+                    "veto": True,
+                },
+            }
 
         fallback = client.get("/some/client/route")
         assert fallback.status_code == 200

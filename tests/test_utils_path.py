@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from attpc_estimator.storage.run_paths import collect_run_files, resolve_run_file
+from attpc_estimator.storage.run_paths import (
+    collect_run_files,
+    format_run_id,
+    resolve_run_file,
+)
 
 
 def test_resolve_run_file_uses_requested_run_from_directory(tmp_path) -> None:
@@ -38,3 +42,8 @@ def test_collect_run_files_still_supports_multi_run_directory(tmp_path) -> None:
         8: run_8.resolve(),
         9: run_9.resolve(),
     }
+
+
+def test_format_run_id_zero_pads_to_four_digits() -> None:
+    assert format_run_id(106) == "0106"
+    assert format_run_id("1056") == "1056"

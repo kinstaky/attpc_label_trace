@@ -84,11 +84,43 @@ export interface HistogramPayload {
   mode: "all" | "labeled" | "filtered";
   run: number;
   filterFile?: string | null;
+  veto?: boolean;
   thresholds?: number[];
   valueBinCount?: number;
   binCount?: number;
   series: HistogramSeries[];
 }
+
+export interface HistogramJobProgress {
+  current: number;
+  total: number;
+  percent: number;
+  unit: string;
+  message: string;
+}
+
+export interface HistogramJobCreateResponse {
+  jobId: string;
+}
+
+export interface HistogramJobProgressMessage extends HistogramJobProgress {
+  type: "progress";
+}
+
+export interface HistogramJobCompleteMessage {
+  type: "complete";
+  payload: HistogramPayload;
+}
+
+export interface HistogramJobErrorMessage {
+  type: "error";
+  detail: string;
+}
+
+export type HistogramJobMessage =
+  | HistogramJobProgressMessage
+  | HistogramJobCompleteMessage
+  | HistogramJobErrorMessage;
 
 export interface LabelAssignResponse {
   labeledCount?: number;

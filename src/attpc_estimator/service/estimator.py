@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from pathlib import Path
+import time
 from typing import Any, Literal
 
 import numpy as np
@@ -22,6 +24,7 @@ from .traces.payload import serialize_trace_payload
 
 ReviewSource = Literal["label_set", "filter_file"]
 SessionMode = Literal["label", "review"]
+logger = logging.getLogger("attpc_estimator.estimator")
 
 
 @dataclass(slots=True)
@@ -50,10 +53,13 @@ class EstimatorService:
         trace_path: Path,
         workspace: Path,
         baseline_window_scale: float = 10.0,
+        default_run: int | None = None,
+        verbose: bool = False,
     ) -> None:
         self.trace_path = trace_path
         self.workspace = workspace
         self.baseline_window_scale = baseline_window_scale
+        self.verbose = verbose
         self.run_files = collect_run_files(trace_path)
         self.repository = LabelRepository(labels_db_path(workspace))
         self.repository.initialize()
@@ -62,8 +68,8 @@ class EstimatorService:
             workspace=workspace,
             baseline_window_scale=baseline_window_scale,
         )
-        default_run = sorted(self.run_files)[0] if self.run_files else None
-        self.session = SessionState(mode="label", run=default_run)
+        resolved_default_run = self._resolve_initial_run(default_run)
+        self.session = SessionState(mode="label", run=resolved_default_run)
         self._sources: dict[tuple[Any, ...], TraceSource] = {}
         self._active_source_key: tuple[Any, ...] | None = None
 
@@ -102,14 +108,30 @@ class EstimatorService:
         if mode == "label":
             resolved_run = self._resolve_run(run)
             source_key = ("label", resolved_run)
+            started = time.perf_counter()
+            self._debug("starting label session run=%s", resolved_run)
             label_source = self._get_or_create_source(source_key)
+            initialized = time.perf_counter()
+            self._debug(
+                "label source ready run=%s took=%.3fs",
+                resolved_run,
+                initialized - started,
+            )
             self._active_source_key = source_key
             self.session = SessionState(mode="label", run=resolved_run)
+            trace_started = time.perf_counter()
+            trace_record = label_source.current_trace() or label_source.next_trace()
+            self._debug(
+                "first label trace ready run=%s event=%s trace=%s took=%.3fs total=%.3fs",
+                trace_record.run,
+                trace_record.event_id,
+                trace_record.trace_id,
+                time.perf_counter() - trace_started,
+                time.perf_counter() - started,
+            )
             return {
                 "session": self.session.as_payload(),
-                "trace": self._serialize_source_trace(
-                    label_source.current_trace() or label_source.next_trace()
-                ),
+                "trace": self._serialize_source_trace(trace_record),
             }
 
         if mode != "review":
@@ -259,13 +281,42 @@ class EstimatorService:
         mode: str,
         run: int,
         filter_file: str | None = None,
+        veto: bool = False,
     ) -> dict[str, Any]:
         return self.histograms.get_histogram(
             metric=metric,
             mode=mode,
             run=run,
             filter_file=filter_file,
+            veto=veto,
         )
+
+    def create_histogram_job(
+        self,
+        *,
+        metric: str,
+        mode: str,
+        run: int,
+        filter_file: str | None = None,
+        veto: bool = False,
+    ) -> dict[str, str]:
+        return {
+            "jobId": self.histograms.create_histogram_job(
+                metric=metric,
+                mode=mode,
+                run=run,
+                filter_file=filter_file,
+                veto=veto,
+            )
+        }
+
+    def next_histogram_job_message(
+        self,
+        *,
+        job_id: str,
+        after_index: int,
+    ) -> tuple[int, dict] | None:
+        return self.histograms.next_job_message(job_id, after_index)
 
     def _resolve_run(self, run: int | None) -> int:
         if run is not None:
@@ -277,6 +328,13 @@ class EstimatorService:
         if self.run_files:
             return sorted(self.run_files)[0]
         raise ValueError("no runs are available")
+
+    def _resolve_initial_run(self, run: int | None) -> int | None:
+        if run is None:
+            return sorted(self.run_files)[0] if self.run_files else None
+        if run not in self.run_files:
+            raise ValueError(f"default run {run} is not available")
+        return run
 
     def _current_source(self) -> TraceSource:
         if self._active_source_key is None:
@@ -313,6 +371,7 @@ class EstimatorService:
                 self.run_files[run],
                 labels=labels,
                 baseline_window_scale=self.baseline_window_scale,
+                verbose=self.verbose,
             )
         if key[0] == "review" and key[1] == "label_set":
             run = int(key[2])
@@ -324,6 +383,7 @@ class EstimatorService:
                 label=label,
                 labels=labels,
                 baseline_window_scale=self.baseline_window_scale,
+                verbose=self.verbose,
             )
         if key[0] == "review" and key[1] == "filter_file":
             filter_file = str(key[2])
@@ -337,11 +397,16 @@ class EstimatorService:
                 rows,
                 labels=labels,
                 baseline_window_scale=self.baseline_window_scale,
+                verbose=self.verbose,
             )
         raise ValueError(f"unsupported source key: {key!r}")
 
     def _labels_snapshot(self) -> dict[TraceRef, StoredLabel]:
         return labels_snapshot(self.repository)
+
+    def _debug(self, message: str, *args: object) -> None:
+        if self.verbose:
+            logger.debug(message, *args)
 
     @staticmethod
     def _is_labeled_review_source(key: tuple[Any, ...], *, run: int) -> bool:

@@ -6,11 +6,11 @@ from pathlib import Path
 
 import h5py
 import numpy as np
-from tqdm import tqdm
 
 from ..storage.labels_db import LabelRepository
 from ..storage.run_paths import labels_db_path, resolve_run_file
-from ..utils.trace_data import PAD_TRACE_OFFSET, preprocess_traces
+from ..utils.trace_data import load_pad_traces, preprocess_traces
+from .progress import ProgressReporter, emit_progress
 
 NORMAL_LABEL_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("normal:0", "0 peak", ("0",)),
@@ -67,39 +67,63 @@ def scan_grouped_labeled_trace_batches(
     grouped_run: GroupedLabeledRun,
     *,
     baseline_window_scale: float,
-    handler: Callable[[int, np.ndarray, np.ndarray], None],
-    progress_desc: str = "Processing labeled pad traces",
+    handler: Callable[[int, np.ndarray, np.ndarray], bool | None],
+    progress: ProgressReporter | None = None,
 ) -> None:
-    total_traces = sum(
-        len(grouped_traces) for grouped_traces in grouped_run.grouped_traces.values()
-    )
     with h5py.File(grouped_run.run_file, "r") as handle:
-        events = handle["events"]
-        with tqdm(total=total_traces, desc=progress_desc, unit="trace") as progress:
-            for event_id in sorted(grouped_run.grouped_traces):
-                grouped_traces = sorted(
-                    grouped_run.grouped_traces[event_id],
-                    key=lambda item: item[0],
+        total_events = len(grouped_run.grouped_traces)
+        processed_events = 0
+        emit_progress(
+            progress,
+            current=0,
+            total=total_events,
+            unit="event",
+        )
+        for event_id in sorted(grouped_run.grouped_traces):
+            grouped_traces = sorted(
+                grouped_run.grouped_traces[event_id],
+                key=lambda item: item[0],
+            )
+            trace_ids = np.asarray(
+                [trace_id for trace_id, _ in grouped_traces],
+                dtype=np.int64,
+            )
+            label_indices = np.asarray(
+                [label_index for _, label_index in grouped_traces],
+                dtype=np.int64,
+            )
+            try:
+                traces = load_pad_traces(
+                    handle,
+                    run=grouped_run.run,
+                    event_id=event_id,
+                    trace_ids=trace_ids,
                 )
-                trace_ids = np.asarray(
-                    [trace_id for trace_id, _ in grouped_traces],
-                    dtype=np.int64,
+            except LookupError:
+                processed_events += 1
+                emit_progress(
+                    progress,
+                    current=processed_events,
+                    total=total_events,
+                    unit="event",
+                    message=f"run={grouped_run.run},event={event_id}",
                 )
-                label_indices = np.asarray(
-                    [label_index for _, label_index in grouped_traces],
-                    dtype=np.int64,
-                )
-                pads = events[f"event_{event_id}"]["get"]["pads"]
-                traces = np.asarray(
-                    pads[trace_ids, PAD_TRACE_OFFSET:], dtype=np.float32
-                )
-                cleaned = preprocess_traces(
-                    traces,
-                    baseline_window_scale=baseline_window_scale,
-                )
-                handler(event_id, cleaned, label_indices)
-                progress.update(len(grouped_traces))
-                progress.set_postfix_str(f"run={grouped_run.run},event={event_id}")
+                continue
+            cleaned = preprocess_traces(
+                traces,
+                baseline_window_scale=baseline_window_scale,
+            )
+            should_continue = handler(event_id, cleaned, label_indices) is not False
+            processed_events += 1
+            emit_progress(
+                progress,
+                current=processed_events,
+                total=total_events,
+                unit="event",
+                message=f"run={grouped_run.run},event={event_id}",
+            )
+            if not should_continue:
+                break
 
 
 def build_label_metadata(

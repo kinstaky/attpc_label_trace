@@ -57,6 +57,17 @@
               @update:model-value="store.setSelectedHistogramFilter"
             />
           </v-col>
+          <v-col v-if="store.state.selectedMode === 'filtered'" cols="12" md="6">
+            <v-switch
+              :model-value="store.state.selectedHistogramVeto"
+              color="primary"
+              hide-details="auto"
+              inset
+              label="Veto filter file"
+              messages="Plot traces not listed in the selected filter file."
+              @update:model-value="store.setSelectedHistogramVeto"
+            />
+          </v-col>
           <v-col cols="12" md="3">
             <v-select
               :items="scaleOptions"
@@ -94,6 +105,29 @@
               @update:model-value="store.setCdfProjectionBin"
             />
           </v-col>
+          <v-col v-if="store.state.selectedMode === 'filtered'" cols="12">
+            <v-row dense>
+              <v-col cols="12" md="3">
+                <v-btn
+                  block
+                  color="primary"
+                  :disabled="!canPlotFiltered"
+                  :loading="store.state.loading"
+                  @click="store.plotFilteredHistogram"
+                >
+                  Plot
+                </v-btn>
+              </v-col>
+              <v-col
+                v-if="store.state.filteredPlotDirty"
+                cols="12"
+                md="9"
+                class="d-flex align-center"
+              >
+                <p class="page-copy">Settings changed. Click Plot to refresh.</p>
+              </v-col>
+            </v-row>
+          </v-col>
         </v-row>
       </v-card-text>
     </v-card>
@@ -110,7 +144,25 @@
     </v-alert>
 
     <div v-if="store.state.loading" class="empty-state">
-      <v-progress-circular color="primary" indeterminate />
+      <div class="progress-state">
+        <v-progress-linear
+          :indeterminate="!store.state.progress"
+          :model-value="store.state.progress?.percent || 0"
+          color="primary"
+          height="10"
+          rounded
+        />
+        <p class="page-kicker">
+          {{
+            store.state.progress
+              ? `${store.state.progress.percent}% · ${store.state.progress.current}/${store.state.progress.total} ${store.state.progress.unit}`
+              : "Starting…"
+          }}
+        </p>
+        <p v-if="store.state.progress?.message" class="page-copy">
+          {{ store.state.progress.message }}
+        </p>
+      </div>
     </div>
 
     <v-row
@@ -235,6 +287,13 @@ const scaleLabel = computed(() => {
 });
 
 const orderedSeries = computed(() => store.orderedSeries.value);
+const canPlotFiltered = computed(
+  () =>
+    store.state.selectedMode === "filtered" &&
+    store.state.selectedRun !== null &&
+    Boolean(store.state.selectedHistogramFilter) &&
+    !store.state.loading,
+);
 
 const isDraggable = computed(
   () => store.state.selectedMode === "labeled" && orderedSeries.value.length > 1,

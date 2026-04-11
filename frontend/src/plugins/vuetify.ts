@@ -23,9 +23,11 @@ import {
   VMain,
   VNavigationDrawer,
   VProgressCircular,
+  VProgressLinear,
   VRow,
   VSelect,
   VSpacer,
+  VSwitch,
   VTextField,
 } from "vuetify/components";
 import { Ripple } from "vuetify/directives";
@@ -51,9 +53,11 @@ const vuetify = createVuetify({
     VMain,
     VNavigationDrawer,
     VProgressCircular,
+    VProgressLinear,
     VRow,
     VSelect,
     VSpacer,
+    VSwitch,
     VTextField,
   },
   directives: {

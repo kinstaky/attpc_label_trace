@@ -6,13 +6,15 @@ from pathlib import Path
 
 import numpy as np
 
-from ..process.estimate_relabel import (
+from ..process.relabel import (
     RELABEL_LABEL_CHOICES,
     build_relabel_rows,
     print_ratio,
     ratio_items_for_label,
 )
+from ..storage.run_paths import format_run_id
 from .config import parse_run, parse_toml_config
+from .progress import tqdm_reporter
 
 
 def main() -> None:
@@ -21,28 +23,31 @@ def main() -> None:
     workspace = Path(args.workspace).expanduser().resolve()
     run_token = args.run
     selected_run = int(run_token) if run_token is not None else None
+    run_name = format_run_id(selected_run) if selected_run is not None else None
 
     if not workspace.is_dir():
         raise SystemExit(f"workspace not found: {workspace}")
 
     try:
-        rows, metrics = build_relabel_rows(
-            trace_path=trace_path,
-            workspace=workspace,
-            run=selected_run,
-            label=args.label,
-            baseline_window_scale=args.baseline_window_scale,
-            peak_separation=args.peak_separation,
-            peak_prominence=args.peak_prominence,
-            peak_width=args.peak_width,
-        )
+        with tqdm_reporter("Relabeling traces") as progress:
+            rows, metrics = build_relabel_rows(
+                trace_path=trace_path,
+                workspace=workspace,
+                run=selected_run,
+                label=args.label,
+                baseline_window_scale=args.baseline_window_scale,
+                peak_separation=args.peak_separation,
+                peak_prominence=args.peak_prominence,
+                peak_width=args.peak_width,
+                progress=progress,
+            )
     except NotImplementedError as exc:
         raise SystemExit(str(exc)) from exc
 
     if run_token is None:
         output_path = workspace / "labeled_relabel.npy"
     else:
-        output_path = workspace / f"run_{run_token}_labeled_relabel.npy"
+        output_path = workspace / f"run_{run_name}_labeled_relabel.npy"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     np.save(output_path, rows)
 
