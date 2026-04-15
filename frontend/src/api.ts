@@ -5,6 +5,7 @@ import type {
   HistogramPayload,
   HistogramVariant,
   LabelAssignResponse,
+  MappingPad,
   SessionPayload,
   SessionResponse,
   StrangeLabel,
@@ -58,6 +59,10 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 export function getBootstrap(): Promise<BootstrapPayload> {
   return request<BootstrapPayload>("/api/bootstrap");
+}
+
+export function getMappingPads(): Promise<MappingPad[]> {
+  return request<MappingPad[]>("/api/mapping/pads");
 }
 
 export function setSession(payload: SessionPayload): Promise<SessionResponse> {

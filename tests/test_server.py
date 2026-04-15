@@ -142,7 +142,10 @@ class DummyMergedService:
 
 
 def test_create_app_routes_and_fallback(tmp_path: Path) -> None:
-    app = create_app(DummyMergedService(), tmp_path / "missing-dist")
+    detector_dir = tmp_path / "detector"
+    detector_dir.mkdir()
+    (detector_dir / "pads.json").write_text('[{"pad": 1, "cx": 1.0, "cy": 2.0}]', encoding="utf-8")
+    app = create_app(DummyMergedService(), tmp_path / "missing-dist", detector_dir)
 
     with TestClient(app) as client:
         assert client.get("/api/health").json() == {"status": "ok"}
@@ -150,6 +153,7 @@ def test_create_app_routes_and_fallback(tmp_path: Path) -> None:
             "appType": "merged",
             "session": {"mode": "label", "run": 8},
         }
+        assert client.get("/api/mapping/pads").json() == [{"pad": 1, "cx": 1.0, "cy": 2.0}]
 
         session = client.post(
             "/api/session",

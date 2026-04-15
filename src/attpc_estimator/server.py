@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -44,14 +45,19 @@ class HistogramJobRequest(BaseModel):
     veto: bool = False
 
 
-def create_app(service: EstimatorService, frontend_dist: Path) -> FastAPI:
+def create_app(
+    service: EstimatorService,
+    frontend_dist: Path,
+    detector_dir: Path | None = None,
+) -> FastAPI:
+    detector_dir = detector_dir or Path(__file__).resolve().parent / "detector"
     app = FastAPI(title="Estimator WebUI", lifespan=_build_lifespan(service.close))
-    app.include_router(build_api_router(service))
+    app.include_router(build_api_router(service, detector_dir))
     _mount_frontend(app, frontend_dist, "AT-TPC WebUI")
     return app
 
 
-def build_api_router(service: EstimatorService) -> APIRouter:
+def build_api_router(service: EstimatorService, detector_dir: Path) -> APIRouter:
     router = APIRouter(prefix="/api")
 
     @router.get("/health")
@@ -61,6 +67,16 @@ def build_api_router(service: EstimatorService) -> APIRouter:
     @router.get("/bootstrap")
     def bootstrap() -> dict:
         return service.bootstrap_state()
+
+    @router.get("/mapping/pads")
+    def mapping_pads() -> list[dict]:
+        pads_path = detector_dir / "pads.json"
+        if not pads_path.exists():
+            raise HTTPException(status_code=404, detail=f"mapping pads file not found: {pads_path}")
+        try:
+            return json.loads(pads_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=500, detail=f"invalid mapping pads file: {pads_path}") from exc
 
     @router.post("/session")
     def set_session(request: SessionRequest) -> dict:

@@ -67,6 +67,7 @@ const items = [
   { to: "/", title: "Home", icon: "mdi-home-outline" },
   { to: "/label", title: "Label", icon: "mdi-pencil-box-outline" },
   { to: "/histograms", title: "Histograms", icon: "mdi-chart-box-outline" },
+  { to: "/mapping", title: "Mapping", icon: "mdi-vector-polygon" },
   { to: "/review", title: "Review", icon: "mdi-file-search-outline" },
 ];
 

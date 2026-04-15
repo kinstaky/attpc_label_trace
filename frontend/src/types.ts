@@ -158,6 +158,29 @@ export type HistogramJobMessage =
   | HistogramJobCompleteMessage
   | HistogramJobErrorMessage;
 
+export type MappingLayer = "Pads" | "Si-0" | "Si-1";
+export type MappingViewMode = "Upstream" | "Downstream";
+
+export interface MappingPad {
+  pad: number;
+  scale: number;
+  direction: number;
+  cobo: number;
+  asad: number;
+  aget: number;
+  channel: number;
+  cx: number;
+  cy: number;
+}
+
+export interface MappingRenderRule {
+  cobo: string;
+  asad: string;
+  aget: string;
+  channel: string;
+  color: string;
+}
+
 export interface LabelAssignResponse {
   labeledCount?: number;
   normalSummary: NormalSummaryItem[];
